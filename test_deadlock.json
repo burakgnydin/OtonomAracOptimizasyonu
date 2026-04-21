@@ -1,0 +1,33 @@
+{
+  "scenario": {
+    "name": "Deadlock Narrow Segment Test",
+    "description": "Iki arac cep olmayan dar segmentte karsi karsiya gelerek deadlock davranisini test eder."
+  },
+  "road": {
+    "lengthMeters": 240,
+    "sensorPositionsMeters": [0, 40, 80, 120, 160, 200, 240],
+    "pocketPositionsMeters": [80, 200],
+    "depotPositionsMeters": [70, 120, 240]
+  },
+  "simulation": {
+    "tickDurationSeconds": 1.0,
+    "maxTicks": 30,
+    "enableReturnTrip": false
+  },
+  "vehicles": [
+    {
+      "id": "V1",
+      "direction": "LeftToRight",
+      "positionMeters": 85,
+      "speedKmh": 10,
+      "targetDepotPositionMeters": 120
+    },
+    {
+      "id": "V2",
+      "direction": "RightToLeft",
+      "positionMeters": 115,
+      "speedKmh": 10,
+      "targetDepotPositionMeters": 70
+    }
+  ]
+}

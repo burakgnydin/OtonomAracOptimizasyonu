@@ -1,0 +1,40 @@
+{
+  "scenario": {
+    "name": "Homework Default (3 Vehicles)",
+    "description": "L=240m yol uzerinde odev varsayilan senaryosu."
+  },
+  "road": {
+    "lengthMeters": 240,
+    "sensorPositionsMeters": [0, 40, 80, 120, 160, 200, 240],
+    "pocketPositionsMeters": [80, 200],
+    "depotPositionsMeters": [70, 120, 240]
+  },
+  "simulation": {
+    "tickDurationSeconds": 1.0,
+    "maxTicks": 180,
+    "enableReturnTrip": true
+  },
+  "vehicles": [
+    {
+      "id": "V1",
+      "direction": "LeftToRight",
+      "positionMeters": 0,
+      "speedKmh": 12,
+      "targetDepotPositionMeters": 240
+    },
+    {
+      "id": "V2",
+      "direction": "RightToLeft",
+      "positionMeters": 240,
+      "speedKmh": 10,
+      "targetDepotPositionMeters": 70
+    },
+    {
+      "id": "V3",
+      "direction": "LeftToRight",
+      "positionMeters": 70,
+      "speedKmh": 8,
+      "targetDepotPositionMeters": 120
+    }
+  ]
+}

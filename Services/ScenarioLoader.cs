@@ -1,0 +1,245 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using OtonomAracOptimizasyonu.Models;
+
+namespace OtonomAracOptimizasyonu.Services;
+
+public sealed class ScenarioLoader
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        ReadCommentHandling = JsonCommentHandling.Skip,
+        AllowTrailingCommas = true,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    public ScenarioDefinition LoadFromFile(string filePath)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            throw new ScenarioLoadException("Scenario dosya yolu bos olamaz.");
+        }
+
+        if (!File.Exists(filePath))
+        {
+            throw new ScenarioLoadException($"Scenario dosyasi bulunamadi: {filePath}");
+        }
+
+        try
+        {
+            var json = File.ReadAllText(filePath);
+            var config = JsonSerializer.Deserialize<ScenarioJsonConfig>(json, JsonOptions)
+                ?? throw new ScenarioLoadException("Scenario JSON icerigi bos veya okunamiyor.");
+
+            return BuildScenario(config);
+        }
+        catch (JsonException ex)
+        {
+            throw new ScenarioLoadException($"Scenario JSON parse hatasi: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            throw new ScenarioLoadException($"Scenario dosyasi okunamadi: {ex.Message}");
+        }
+    }
+
+    private static ScenarioDefinition BuildScenario(ScenarioJsonConfig config)
+    {
+        ValidateTopLevel(config);
+        ValidateInfrastructure(config.Road);
+        ValidateSimulation(config.Simulation);
+        ValidateVehicles(config.Vehicles, config.Road);
+
+        var road = new Road(
+            config.Road.LengthMeters,
+            config.Road.SensorPositionsMeters.Select(position => new Sensor(position)),
+            config.Road.PocketPositionsMeters.Select(position => new Pocket(position)),
+            config.Road.DepotPositionsMeters.Select(position => new Depot(position)));
+
+        var vehicles = config.Vehicles
+            .Select(vehicle => new Vehicle(
+                vehicle.Id,
+                vehicle.Direction,
+                vehicle.PositionMeters,
+                vehicle.SpeedKmh,
+                vehicle.TargetDepotPositionMeters))
+            .ToList();
+
+        ValidateInitialStorageCapacity(vehicles, road);
+
+        return new ScenarioDefinition(
+            config.Scenario.Name,
+            config.Scenario.Description,
+            road,
+            vehicles,
+            config.Simulation.TickDurationSeconds,
+            config.Simulation.MaxTicks,
+            config.Simulation.EnableReturnTrip);
+    }
+
+    private static void ValidateTopLevel(ScenarioJsonConfig config)
+    {
+        if (config.Scenario is null || config.Road is null || config.Simulation is null || config.Vehicles is null)
+        {
+            throw new ScenarioLoadException("Scenario JSON zorunlu alanlari icermiyor (scenario, road, simulation, vehicles).");
+        }
+
+        if (string.IsNullOrWhiteSpace(config.Scenario.Name))
+        {
+            throw new ScenarioLoadException("Scenario name alani bos olamaz.");
+        }
+    }
+
+    private static void ValidateInfrastructure(RoadJsonConfig road)
+    {
+        if (road.LengthMeters <= 0)
+        {
+            throw new ScenarioLoadException("Road length 0'dan buyuk olmali.");
+        }
+
+        if (road.SensorPositionsMeters.Count == 0)
+        {
+            throw new ScenarioLoadException("En az bir sensor tanimli olmali.");
+        }
+
+        ValidatePositions("Sensor", road.SensorPositionsMeters, road.LengthMeters);
+        ValidatePositions("Pocket", road.PocketPositionsMeters, road.LengthMeters);
+        ValidatePositions("Depot", road.DepotPositionsMeters, road.LengthMeters);
+    }
+
+    private static void ValidateSimulation(SimulationJsonConfig simulation)
+    {
+        if (simulation.TickDurationSeconds <= 0)
+        {
+            throw new ScenarioLoadException("TickDurationSeconds 0'dan buyuk olmali.");
+        }
+
+        if (simulation.MaxTicks <= 0)
+        {
+            throw new ScenarioLoadException("MaxTicks 0'dan buyuk olmali.");
+        }
+    }
+
+    private static void ValidateVehicles(IReadOnlyCollection<VehicleJsonConfig> vehicles, RoadJsonConfig road)
+    {
+        if (vehicles.Count == 0)
+        {
+            throw new ScenarioLoadException("En az bir arac tanimli olmali.");
+        }
+
+        var duplicateId = vehicles
+            .GroupBy(v => v.Id, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(group => group.Count() > 1);
+
+        if (duplicateId is not null)
+        {
+            throw new ScenarioLoadException($"Ayni ID ile birden fazla arac tanimli: {duplicateId.Key}");
+        }
+
+        var depotSet = road.DepotPositionsMeters.ToHashSet();
+        foreach (var vehicle in vehicles)
+        {
+            if (string.IsNullOrWhiteSpace(vehicle.Id))
+            {
+                throw new ScenarioLoadException("Arac ID alani bos olamaz.");
+            }
+
+            if (vehicle.PositionMeters < 0 || vehicle.PositionMeters > road.LengthMeters)
+            {
+                throw new ScenarioLoadException(
+                    $"Arac {vehicle.Id} icin gecersiz baslangic konumu: {vehicle.PositionMeters}m (Road: 0-{road.LengthMeters}).");
+            }
+
+            if (vehicle.SpeedKmh < 0 || vehicle.SpeedKmh > Vehicle.MaxSpeedKmh)
+            {
+                throw new ScenarioLoadException(
+                    $"Arac {vehicle.Id} icin gecersiz hiz: {vehicle.SpeedKmh} km/h (Max: {Vehicle.MaxSpeedKmh}).");
+            }
+
+            if (!depotSet.Contains(vehicle.TargetDepotPositionMeters))
+            {
+                throw new ScenarioLoadException(
+                    $"Arac {vehicle.Id} icin hedef depo gecersiz: {vehicle.TargetDepotPositionMeters}m.");
+            }
+        }
+    }
+
+    private static void ValidateInitialStorageCapacity(IReadOnlyCollection<Vehicle> vehicles, Road road)
+    {
+        foreach (var pocket in road.Pockets)
+        {
+            var count = vehicles.Count(vehicle => Math.Abs(vehicle.PositionMeters - pocket.PositionMeters) < 0.001d);
+            if (count > pocket.Capacity)
+            {
+                throw new ScenarioLoadException(
+                    $"Pocket kapasitesi asildi: {pocket.PositionMeters}m konumunda {count} arac var (Kapasite: {pocket.Capacity}).");
+            }
+        }
+
+        foreach (var depot in road.Depots)
+        {
+            var count = vehicles.Count(vehicle => Math.Abs(vehicle.PositionMeters - depot.PositionMeters) < 0.001d);
+            if (count > depot.Capacity)
+            {
+                throw new ScenarioLoadException(
+                    $"Depot kapasitesi asildi: {depot.PositionMeters}m konumunda {count} arac var (Kapasite: {depot.Capacity}).");
+            }
+        }
+    }
+
+    private static void ValidatePositions(string label, IReadOnlyCollection<int> positions, int roadLength)
+    {
+        ArgumentNullException.ThrowIfNull(positions);
+
+        var duplicatePosition = positions
+            .GroupBy(x => x)
+            .FirstOrDefault(group => group.Count() > 1);
+
+        if (duplicatePosition is not null)
+        {
+            throw new ScenarioLoadException($"{label} konumlari tekrar ediyor: {duplicatePosition.Key}m");
+        }
+
+        var outOfBounds = positions.FirstOrDefault(position => position < 0 || position > roadLength);
+        if (positions.Any(position => position < 0 || position > roadLength))
+        {
+            throw new ScenarioLoadException($"{label} konumu yol siniri disinda: {outOfBounds}m");
+        }
+    }
+}
+
+public sealed class ScenarioLoadException : Exception
+{
+    public ScenarioLoadException(string message) : base(message)
+    {
+    }
+}
+
+public sealed record ScenarioJsonConfig(
+    ScenarioMetadataJsonConfig Scenario,
+    RoadJsonConfig Road,
+    SimulationJsonConfig Simulation,
+    IReadOnlyCollection<VehicleJsonConfig> Vehicles);
+
+public sealed record ScenarioMetadataJsonConfig(
+    string Name,
+    string Description);
+
+public sealed record RoadJsonConfig(
+    int LengthMeters,
+    IReadOnlyCollection<int> SensorPositionsMeters,
+    IReadOnlyCollection<int> PocketPositionsMeters,
+    IReadOnlyCollection<int> DepotPositionsMeters);
+
+public sealed record SimulationJsonConfig(
+    double TickDurationSeconds,
+    int MaxTicks,
+    bool EnableReturnTrip);
+
+public sealed record VehicleJsonConfig(
+    string Id,
+    VehicleDirection Direction,
+    double PositionMeters,
+    double SpeedKmh,
+    int TargetDepotPositionMeters);
