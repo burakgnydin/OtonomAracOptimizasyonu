@@ -4,7 +4,14 @@ public sealed class Vehicle
 {
     public const double MaxSpeedKmh = 20d;
 
-    public Vehicle(string id, VehicleDirection direction, double positionMeters, double speedKmh, int targetDepotPositionMeters)
+    public Vehicle(
+        string id,
+        VehicleDirection direction,
+        double positionMeters,
+        double speedKmh,
+        int targetDepotPositionMeters,
+        bool isPriority = false,
+        bool singleMissionOnly = false)
     {
         if (string.IsNullOrWhiteSpace(id))
         {
@@ -32,6 +39,8 @@ public sealed class Vehicle
         SpeedKmh = speedKmh;
         TargetDepotPositionMeters = targetDepotPositionMeters;
         OriginalTargetDepotPositionMeters = targetDepotPositionMeters;
+        IsPriority = isPriority;
+        SingleMissionOnly = singleMissionOnly;
         CurrentTask = VehicleTask.NormalDrive;
     }
 
@@ -52,6 +61,10 @@ public sealed class Vehicle
     public int? ManeuverSafeAreaPositionMeters { get; private set; }
 
     public string? YieldToVehicleId { get; private set; }
+
+    public bool IsPriority { get; }
+
+    public bool SingleMissionOnly { get; }
 
     public void UpdatePosition(double newPositionMeters)
     {

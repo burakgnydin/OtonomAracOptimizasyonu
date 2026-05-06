@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\Users\\admin\\OtonomAracOptimizasyonu\\OtonomAracOptimizasyonu.csproj": {}
+    "C:\\Users\\admin\\OneDrive\\Masaüstü\\ProjectsCS\\OtonomAracOptimizasyonu\\OtonomAracOptimizasyonu.csproj": {}
   },
   "projects": {
-    "C:\\Users\\admin\\OtonomAracOptimizasyonu\\OtonomAracOptimizasyonu.csproj": {
+    "C:\\Users\\admin\\OneDrive\\Masaüstü\\ProjectsCS\\OtonomAracOptimizasyonu\\OtonomAracOptimizasyonu.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\Users\\admin\\OtonomAracOptimizasyonu\\OtonomAracOptimizasyonu.csproj",
+        "projectUniqueName": "C:\\Users\\admin\\OneDrive\\Masaüstü\\ProjectsCS\\OtonomAracOptimizasyonu\\OtonomAracOptimizasyonu.csproj",
         "projectName": "OtonomAracOptimizasyonu",
-        "projectPath": "C:\\Users\\admin\\OtonomAracOptimizasyonu\\OtonomAracOptimizasyonu.csproj",
+        "projectPath": "C:\\Users\\admin\\OneDrive\\Masaüstü\\ProjectsCS\\OtonomAracOptimizasyonu\\OtonomAracOptimizasyonu.csproj",
         "packagesPath": "C:\\Users\\admin\\.nuget\\packages\\",
-        "outputPath": "C:\\Users\\admin\\OtonomAracOptimizasyonu\\obj\\",
+        "outputPath": "C:\\Users\\admin\\OneDrive\\Masaüstü\\ProjectsCS\\OtonomAracOptimizasyonu\\obj\\",
         "projectStyle": "PackageReference",
         "fallbackFolders": [
           "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
@@ -22,7 +22,7 @@
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
         "originalTargetFrameworks": [
-          "net9.0"
+          "net9.0-windows"
         ],
         "sources": {
           "C:\\Program Files (x86)\\Microsoft SDKs\\NuGetPackages\\": {},
@@ -30,8 +30,8 @@
           "https://api.nuget.org/v3/index.json": {}
         },
         "frameworks": {
-          "net9.0": {
-            "targetAlias": "net9.0",
+          "net9.0-windows7.0": {
+            "targetAlias": "net9.0-windows",
             "projectReferences": {}
           }
         },
@@ -48,8 +48,8 @@
         "SdkAnalysisLevel": "9.0.300"
       },
       "frameworks": {
-        "net9.0": {
-          "targetAlias": "net9.0",
+        "net9.0-windows7.0": {
+          "targetAlias": "net9.0-windows",
           "imports": [
             "net461",
             "net462",
@@ -64,9 +64,12 @@
           "frameworkReferences": {
             "Microsoft.NETCore.App": {
               "privateAssets": "all"
+            },
+            "Microsoft.WindowsDesktop.App.WindowsForms": {
+              "privateAssets": "none"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.304/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.313/PortableRuntimeIdentifierGraph.json"
         }
       }
     }

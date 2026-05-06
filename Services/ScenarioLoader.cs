@@ -48,6 +48,7 @@ public sealed class ScenarioLoader
     {
         ValidateTopLevel(config);
         ValidateInfrastructure(config.Road);
+        ValidateSensorLayout(config.Road);
         ValidateSimulation(config.Simulation);
         ValidateVehicles(config.Vehicles, config.Road);
 
@@ -63,7 +64,9 @@ public sealed class ScenarioLoader
                 vehicle.Direction,
                 vehicle.PositionMeters,
                 vehicle.SpeedKmh,
-                vehicle.TargetDepotPositionMeters))
+                vehicle.TargetDepotPositionMeters,
+                vehicle.IsPriority,
+                vehicle.SingleMissionOnly))
             .ToList();
 
         ValidateInitialStorageCapacity(vehicles, road);
@@ -123,9 +126,9 @@ public sealed class ScenarioLoader
 
     private static void ValidateVehicles(IReadOnlyCollection<VehicleJsonConfig> vehicles, RoadJsonConfig road)
     {
-        if (vehicles.Count == 0)
+        if (vehicles.Count < 3 || vehicles.Count > 20)
         {
-            throw new ScenarioLoadException("En az bir arac tanimli olmali.");
+            throw new ScenarioLoadException("Arac sayisi 3 ile 20 arasinda olmalidir.");
         }
 
         var duplicateId = vehicles
@@ -207,6 +210,20 @@ public sealed class ScenarioLoader
             throw new ScenarioLoadException($"{label} konumu yol siniri disinda: {outOfBounds}m");
         }
     }
+
+    private static void ValidateSensorLayout(RoadJsonConfig road)
+    {
+        var expected = Enumerable.Range(0, (road.LengthMeters / 40) + 1)
+            .Select(index => index * 40)
+            .ToArray();
+
+        var actual = road.SensorPositionsMeters.OrderBy(x => x).ToArray();
+        if (!expected.SequenceEqual(actual))
+        {
+            throw new ScenarioLoadException(
+                $"Sensor dizilimi odev kisitini saglamiyor. Beklenen: [{string.Join(", ", expected)}], Gelen: [{string.Join(", ", actual)}]");
+        }
+    }
 }
 
 public sealed class ScenarioLoadException : Exception
@@ -242,4 +259,6 @@ public sealed record VehicleJsonConfig(
     VehicleDirection Direction,
     double PositionMeters,
     double SpeedKmh,
-    int TargetDepotPositionMeters);
+    int TargetDepotPositionMeters,
+    bool IsPriority = false,
+    bool SingleMissionOnly = false);

@@ -7,6 +7,7 @@ public interface ITrafficStrategy
     TrafficDecision Evaluate(
         Vehicle vehicle,
         Road road,
-        IReadOnlyCollection<Vehicle> trafficState,
+        VehicleRestrictedState currentVehicleState,
+        IReadOnlyCollection<VehicleRestrictedState> trafficState,
         double tickDurationSeconds);
 }

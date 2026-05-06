@@ -1,0 +1,16 @@
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\obj\Debug\net9.0-windows\OtonomAracOptimizasyonu.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\obj\Debug\net9.0-windows\OtonomAracOptimizasyonu.AssemblyInfoInputs.cache
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\obj\Debug\net9.0-windows\OtonomAracOptimizasyonu.AssemblyInfo.cs
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\obj\Debug\net9.0-windows\OtonomAracOptimizasyonu.csproj.CoreCompileInputs.cache
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\obj\Debug\net9.0-windows\OtonomAracOptimizasyonu.sourcelink.json
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\bin\Debug\net9.0-windows\ScenarioConfig.json
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\bin\Debug\net9.0-windows\OtonomAracOptimizasyonu.exe
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\bin\Debug\net9.0-windows\OtonomAracOptimizasyonu.deps.json
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\bin\Debug\net9.0-windows\OtonomAracOptimizasyonu.runtimeconfig.json
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\bin\Debug\net9.0-windows\OtonomAracOptimizasyonu.dll
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\bin\Debug\net9.0-windows\OtonomAracOptimizasyonu.pdb
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\obj\Debug\net9.0-windows\OtonomAracOptimizasyonu.dll
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\obj\Debug\net9.0-windows\refint\OtonomAracOptimizasyonu.dll
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\obj\Debug\net9.0-windows\OtonomAracOptimizasyonu.pdb
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\obj\Debug\net9.0-windows\OtonomAracOptimizasyonu.genruntimeconfig.cache
+C:\Users\admin\OneDrive\Masaüstü\ProjectsCS\OtonomAracOptimizasyonu\obj\Debug\net9.0-windows\ref\OtonomAracOptimizasyonu.dll

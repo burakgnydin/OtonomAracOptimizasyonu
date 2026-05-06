@@ -5,15 +5,19 @@ namespace OtonomAracOptimizasyonu.Services;
 public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
 {
     public const double MinimumDistanceMeters = 20d;
+    private const double UncertaintyBufferMultiplier = 0.5d;
+    private const string AssumedOncomingVehicleId = "ASSUMED_ONCOMING";
 
     public TrafficDecision Evaluate(
         Vehicle vehicle,
         Road road,
-        IReadOnlyCollection<Vehicle> trafficState,
+        VehicleRestrictedState currentVehicleState,
+        IReadOnlyCollection<VehicleRestrictedState> trafficState,
         double tickDurationSeconds)
     {
         ArgumentNullException.ThrowIfNull(vehicle);
         ArgumentNullException.ThrowIfNull(road);
+        ArgumentNullException.ThrowIfNull(currentVehicleState);
         ArgumentNullException.ThrowIfNull(trafficState);
 
         if (tickDurationSeconds <= 0)
@@ -28,28 +32,38 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
                 : TrafficDecision.Stop(TrafficStopReason.DeadlockAvoidance, "Waiting In Safe Area");
         }
 
-        var predictedPosition = PredictNextPosition(vehicle, road, tickDurationSeconds);
+        if (ShouldStartSensorBasedManeuver(vehicle, currentVehicleState))
+        {
+            var timeoutManeuverDecision = CreateSensorTimeoutManeuverDecision(currentVehicleState, road);
+            if (timeoutManeuverDecision is not null)
+            {
+                return timeoutManeuverDecision;
+            }
+        }
+
+        var predictedPosition = PredictNextPosition(currentVehicleState, road, tickDurationSeconds);
+        var requiredGap = DynamicMinimumGap(currentVehicleState.PositionUncertaintyMeters);
         var sameDirectionVehicles = trafficState
-            .Where(x => x.Id != vehicle.Id && x.Direction == vehicle.Direction)
+            .Where(x => x.VehicleId != vehicle.Id && x.InferredDirection == currentVehicleState.InferredDirection)
             .ToList();
 
-        if (ViolatesMinimumGapWithSameDirectionVehicles(vehicle, predictedPosition, sameDirectionVehicles))
+        if (ViolatesMinimumGapWithSameDirectionVehicles(currentVehicleState, predictedPosition, requiredGap, sameDirectionVehicles))
         {
             return TrafficDecision.Stop(TrafficStopReason.CollisionRisk, "Collision Risk (Same Direction)");
         }
 
         var oppositeDirectionVehicles = trafficState
-            .Where(x => x.Id != vehicle.Id && x.Direction != vehicle.Direction)
+            .Where(x => x.VehicleId != vehicle.Id && x.InferredDirection != currentVehicleState.InferredDirection)
             .ToList();
 
         var oncomingVehicle = oppositeDirectionVehicles
-            .Where(other => IsFacingEachOther(vehicle, other))
-            .OrderBy(other => Math.Abs(other.PositionMeters - vehicle.PositionMeters))
+            .Where(other => IsFacingEachOther(currentVehicleState, other))
+            .OrderBy(other => Math.Abs(other.EstimatedPositionMeters - currentVehicleState.EstimatedPositionMeters))
             .FirstOrDefault();
 
-        if (ViolatesMinimumGapWithOppositeDirectionVehicles(predictedPosition, oppositeDirectionVehicles))
+        if (ViolatesMinimumGapWithOppositeDirectionVehicles(predictedPosition, requiredGap, oppositeDirectionVehicles))
         {
-            var maneuverDecision = TryCreateManeuverDecision(vehicle, oncomingVehicle, road);
+            var maneuverDecision = TryCreateManeuverDecision(vehicle, currentVehicleState, oncomingVehicle, road);
             if (maneuverDecision is not null)
             {
                 return maneuverDecision;
@@ -58,7 +72,7 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             return TrafficDecision.Stop(TrafficStopReason.CollisionRisk, "Collision Risk (Opposite Direction)");
         }
 
-        if (TriggersDeadlockWait(vehicle, oppositeDirectionVehicles, road))
+        if (TriggersDeadlockWait(vehicle, currentVehicleState, oppositeDirectionVehicles, road))
         {
             return TrafficDecision.Stop(TrafficStopReason.DeadlockAvoidance, "Deadlock Avoidance");
         }
@@ -66,7 +80,11 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
         return TrafficDecision.MoveAllowed();
     }
 
-    private static TrafficDecision? TryCreateManeuverDecision(Vehicle vehicle, Vehicle? oncomingVehicle, Road road)
+    private static TrafficDecision? TryCreateManeuverDecision(
+        Vehicle vehicle,
+        VehicleRestrictedState currentVehicleState,
+        VehicleRestrictedState? oncomingVehicle,
+        Road road)
     {
         if (oncomingVehicle is null || !IsLowerPriority(vehicle, oncomingVehicle))
         {
@@ -78,42 +96,57 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             return null;
         }
 
-        var safeArea = FindNearestAvailableSafeArea(vehicle, road);
+        var safeArea = FindNearestAvailableSafeArea(currentVehicleState, road);
         if (safeArea is null)
         {
             return null;
         }
 
         var safeAreaType = safeArea is Pocket ? "Pocket" : "Depot";
-        var directive = new ManeuverDirective(safeArea.PositionMeters, oncomingVehicle.Id, safeAreaType);
+        var directive = new ManeuverDirective(safeArea.PositionMeters, oncomingVehicle.VehicleId, safeAreaType);
         return TrafficDecision.StartManeuver(
             directive,
             $"Retreat to {safeAreaType} at {safeArea.PositionMeters}m to resolve deadlock");
     }
 
-    private static VehicleStorageArea? FindNearestAvailableSafeArea(Vehicle vehicle, Road road)
+    private static VehicleStorageArea? FindNearestAvailableSafeArea(VehicleRestrictedState currentVehicleState, Road road)
     {
         return road.Pockets
             .Cast<VehicleStorageArea>()
             .Concat(road.Depots)
             .Where(area => !area.IsFull)
-            .OrderBy(area => Math.Abs(area.PositionMeters - vehicle.PositionMeters))
+            .OrderBy(area => Math.Abs(area.PositionMeters - currentVehicleState.EstimatedPositionMeters))
             .FirstOrDefault();
     }
 
-    private static bool IsLowerPriority(Vehicle candidate, Vehicle other)
+    private static bool IsLowerPriority(Vehicle candidate, VehicleRestrictedState other)
     {
-        return string.CompareOrdinal(candidate.Id, other.Id) > 0;
+        if (candidate.IsPriority)
+        {
+            return false;
+        }
+
+        return string.CompareOrdinal(candidate.Id, other.VehicleId) > 0;
     }
 
-    private static bool CanExitSafeArea(Vehicle vehicle, IReadOnlyCollection<Vehicle> trafficState)
+    private static bool CanExitSafeArea(Vehicle vehicle, IReadOnlyCollection<VehicleRestrictedState> trafficState)
     {
+        // Pocket/depot icinde bekleyen arac yalnizca yol sensorlugu yesile dondugunde cikis yapar.
+        var hasAnyRedSignal = trafficState.Any(other =>
+            other.VehicleId != vehicle.Id &&
+            other.IsSensorSignalRed);
+
+        if (hasAnyRedSignal)
+        {
+            return false;
+        }
+
         if (string.IsNullOrWhiteSpace(vehicle.YieldToVehicleId))
         {
             return true;
         }
 
-        var yieldToVehicle = trafficState.FirstOrDefault(other => other.Id == vehicle.YieldToVehicleId);
+        var yieldToVehicle = trafficState.FirstOrDefault(other => other.VehicleId == vehicle.YieldToVehicleId);
         if (yieldToVehicle is null)
         {
             return true;
@@ -124,45 +157,76 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             return true;
         }
 
-        return Math.Abs(yieldToVehicle.PositionMeters - vehicle.ManeuverSafeAreaPositionMeters.Value) > (MinimumDistanceMeters * 2d);
+        return Math.Abs(yieldToVehicle.EstimatedPositionMeters - vehicle.ManeuverSafeAreaPositionMeters.Value) > (MinimumDistanceMeters * 2d);
+    }
+
+    private static bool ShouldStartSensorBasedManeuver(Vehicle vehicle, VehicleRestrictedState state)
+    {
+        if (!state.IsSensorSignalRed || !state.NextSensorTimedOut)
+        {
+            return false;
+        }
+
+        return vehicle.CurrentTask == VehicleTask.NormalDrive;
+    }
+
+    private static TrafficDecision? CreateSensorTimeoutManeuverDecision(VehicleRestrictedState currentVehicleState, Road road)
+    {
+        var safeArea = FindNearestAvailableSafeArea(currentVehicleState, road);
+        if (safeArea is null)
+        {
+            return null;
+        }
+
+        var safeAreaType = safeArea is Pocket ? "Pocket" : "Depot";
+        var directive = new ManeuverDirective(safeArea.PositionMeters, AssumedOncomingVehicleId, safeAreaType);
+        SimulationLogger.Log(
+            $"Vehicle {currentVehicleState.VehicleId} timeout at sensor {currentVehicleState.ActiveSensorId}m. " +
+            $"Assuming oncoming traffic, maneuvering to {safeAreaType} {safeArea.PositionMeters}m.");
+        return TrafficDecision.StartManeuver(
+            directive,
+            $"Sensor timeout near {currentVehicleState.ActiveSensorId}m, retreating to {safeAreaType} at {safeArea.PositionMeters}m");
     }
 
     private static bool ViolatesMinimumGapWithSameDirectionVehicles(
-        Vehicle vehicle,
+        VehicleRestrictedState currentVehicleState,
         double predictedPosition,
-        IReadOnlyCollection<Vehicle> sameDirectionVehicles)
+        double requiredGapMeters,
+        IReadOnlyCollection<VehicleRestrictedState> sameDirectionVehicles)
     {
         var leadingVehicleDistance = sameDirectionVehicles
-            .Select(other => vehicle.Direction == VehicleDirection.LeftToRight
-                ? other.PositionMeters - predictedPosition
-                : predictedPosition - other.PositionMeters)
+            .Select(other => currentVehicleState.InferredDirection == VehicleDirection.LeftToRight
+                ? other.EstimatedPositionMeters - predictedPosition
+                : predictedPosition - other.EstimatedPositionMeters)
             .Where(distance => distance >= 0)
             .DefaultIfEmpty(double.MaxValue)
             .Min();
 
-        return leadingVehicleDistance < MinimumDistanceMeters;
+        return leadingVehicleDistance < requiredGapMeters;
     }
 
     private static bool ViolatesMinimumGapWithOppositeDirectionVehicles(
         double predictedPosition,
-        IReadOnlyCollection<Vehicle> oppositeDirectionVehicles)
+        double requiredGapMeters,
+        IReadOnlyCollection<VehicleRestrictedState> oppositeDirectionVehicles)
     {
         var closestDistance = oppositeDirectionVehicles
-            .Select(other => Math.Abs(other.PositionMeters - predictedPosition))
+            .Select(other => Math.Abs(other.EstimatedPositionMeters - predictedPosition))
             .DefaultIfEmpty(double.MaxValue)
             .Min();
 
-        return closestDistance < MinimumDistanceMeters;
+        return closestDistance < requiredGapMeters;
     }
 
     private static bool TriggersDeadlockWait(
         Vehicle vehicle,
-        IReadOnlyCollection<Vehicle> oppositeDirectionVehicles,
+        VehicleRestrictedState currentVehicleState,
+        IReadOnlyCollection<VehicleRestrictedState> oppositeDirectionVehicles,
         Road road)
     {
         var oncomingVehicle = oppositeDirectionVehicles
-            .Where(other => IsFacingEachOther(vehicle, other))
-            .OrderBy(other => Math.Abs(other.PositionMeters - vehicle.PositionMeters))
+            .Where(other => IsFacingEachOther(currentVehicleState, other))
+            .OrderBy(other => Math.Abs(other.EstimatedPositionMeters - currentVehicleState.EstimatedPositionMeters))
             .FirstOrDefault();
 
         if (oncomingVehicle is null)
@@ -170,8 +234,8 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             return false;
         }
 
-        var segmentStart = Math.Min(vehicle.PositionMeters, oncomingVehicle.PositionMeters);
-        var segmentEnd = Math.Max(vehicle.PositionMeters, oncomingVehicle.PositionMeters);
+        var segmentStart = Math.Min(currentVehicleState.EstimatedPositionMeters, oncomingVehicle.EstimatedPositionMeters);
+        var segmentEnd = Math.Max(currentVehicleState.EstimatedPositionMeters, oncomingVehicle.EstimatedPositionMeters);
 
         var safeAreas = road.Pockets.Cast<VehicleStorageArea>()
             .Concat(road.Depots)
@@ -180,7 +244,7 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
 
         if (safeAreas.Count > 0)
         {
-            var vehicleHasReachableSafeArea = HasReachableSafeArea(vehicle, safeAreas);
+            var vehicleHasReachableSafeArea = HasReachableSafeArea(currentVehicleState, safeAreas);
             var oncomingHasReachableSafeArea = HasReachableSafeArea(oncomingVehicle, safeAreas);
 
             if (vehicleHasReachableSafeArea || oncomingHasReachableSafeArea)
@@ -189,35 +253,40 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             }
         }
 
-        return string.CompareOrdinal(vehicle.Id, oncomingVehicle.Id) > 0;
+        return string.CompareOrdinal(vehicle.Id, oncomingVehicle.VehicleId) > 0;
     }
 
-    private static bool HasReachableSafeArea(Vehicle vehicle, IReadOnlyCollection<VehicleStorageArea> safeAreas)
+    private static bool HasReachableSafeArea(VehicleRestrictedState vehicle, IReadOnlyCollection<VehicleStorageArea> safeAreas)
     {
         return safeAreas.Any(area =>
             !area.IsFull &&
-            (vehicle.Direction == VehicleDirection.LeftToRight
-                ? area.PositionMeters >= vehicle.PositionMeters
-                : area.PositionMeters <= vehicle.PositionMeters));
+            (vehicle.InferredDirection == VehicleDirection.LeftToRight
+                ? area.PositionMeters >= vehicle.EstimatedPositionMeters
+                : area.PositionMeters <= vehicle.EstimatedPositionMeters));
     }
 
-    private static bool IsFacingEachOther(Vehicle left, Vehicle right)
+    private static bool IsFacingEachOther(VehicleRestrictedState left, VehicleRestrictedState right)
     {
-        return left.Direction == VehicleDirection.LeftToRight &&
-               right.Direction == VehicleDirection.RightToLeft &&
-               left.PositionMeters < right.PositionMeters
+        return left.InferredDirection == VehicleDirection.LeftToRight &&
+               right.InferredDirection == VehicleDirection.RightToLeft &&
+               left.EstimatedPositionMeters < right.EstimatedPositionMeters
                ||
-               left.Direction == VehicleDirection.RightToLeft &&
-               right.Direction == VehicleDirection.LeftToRight &&
-               left.PositionMeters > right.PositionMeters;
+               left.InferredDirection == VehicleDirection.RightToLeft &&
+               right.InferredDirection == VehicleDirection.LeftToRight &&
+               left.EstimatedPositionMeters > right.EstimatedPositionMeters;
     }
 
-    private static double PredictNextPosition(Vehicle vehicle, Road road, double tickDurationSeconds)
+    private static double PredictNextPosition(VehicleRestrictedState vehicle, Road road, double tickDurationSeconds)
     {
-        var speedMetersPerSecond = vehicle.SpeedKmh * (1000d / 3600d);
-        var directionSign = vehicle.Direction == VehicleDirection.LeftToRight ? 1d : -1d;
-        var candidate = vehicle.PositionMeters + (speedMetersPerSecond * tickDurationSeconds * directionSign);
+        var speedMetersPerSecond = vehicle.LastKnownSpeedKmh * (1000d / 3600d);
+        var directionSign = vehicle.InferredDirection == VehicleDirection.LeftToRight ? 1d : -1d;
+        var candidate = vehicle.EstimatedPositionMeters + (speedMetersPerSecond * tickDurationSeconds * directionSign);
 
         return Math.Clamp(candidate, 0, road.LengthMeters);
+    }
+
+    private static double DynamicMinimumGap(double uncertaintyMeters)
+    {
+        return MinimumDistanceMeters + (uncertaintyMeters * UncertaintyBufferMultiplier);
     }
 }

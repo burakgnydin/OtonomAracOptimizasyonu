@@ -42,7 +42,7 @@ public sealed class SimulationEngine
 
     public SimulationTickReport Tick()
     {
-        TrafficController.UpdateTrafficState(_vehicles);
+        TrafficController.UpdateTrafficState(_vehicles, Road);
         TickCount++;
         var vehicleStates = new List<VehicleTickState>(_vehicles.Count);
 
@@ -59,6 +59,9 @@ public sealed class SimulationEngine
             if (trafficDecision.ManeuverDirective is not null)
             {
                 ApplyManeuverDirective(vehicle, trafficDecision.ManeuverDirective);
+                SimulationLogger.Log(
+                    $"Vehicle {vehicle.Id} retreating to {trafficDecision.ManeuverDirective.SafeAreaType} " +
+                    $"at {trafficDecision.ManeuverDirective.SafeAreaPositionMeters}m.");
                 vehicleStates.Add(CreateTickState(
                     vehicle,
                     TrafficStopReason.DeadlockAvoidance,
@@ -85,6 +88,7 @@ public sealed class SimulationEngine
                 if (vehicle.CurrentTask == VehicleTask.RetreatingToSafeArea)
                 {
                     vehicle.MarkWaitingInSafeArea();
+                    SimulationLogger.Log($"Vehicle {vehicle.Id} entered safe area at {vehicle.PositionMeters:0.0}m and is waiting.");
                     vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.DeadlockAvoidance, "Waiting in Safe Area"));
                     continue;
                 }
@@ -105,8 +109,9 @@ public sealed class SimulationEngine
     {
         vehicle.UpdateSpeed(0);
 
-        if (!EnableReturnTrip)
+        if (!EnableReturnTrip || vehicle.SingleMissionOnly)
         {
+            SimulationLogger.Log($"Vehicle {vehicle.Id} completed single mission at depot {vehicle.PositionMeters:0.0}m.");
             return;
         }
 

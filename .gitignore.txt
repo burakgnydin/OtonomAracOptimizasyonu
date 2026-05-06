@@ -1,0 +1,10 @@
+# Visual Studio geçici dosyaları
+.vs/
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.cache
+
+# JSON Config (Eğer özel senaryolarını gizli tutmak istersen, ama ödev için gönderebilirsin)
+# ScenarioConfig.json
