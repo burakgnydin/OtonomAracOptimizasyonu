@@ -18,29 +18,29 @@ public sealed class ScenarioLoader
     {
         if (string.IsNullOrWhiteSpace(filePath))
         {
-            throw new ScenarioLoadException("Scenario dosya yolu bos olamaz.");
+            throw new ScenarioLoadException("Senaryo dosya yolu bos olamaz.");
         }
 
         if (!File.Exists(filePath))
         {
-            throw new ScenarioLoadException($"Scenario dosyasi bulunamadi: {filePath}");
+            throw new ScenarioLoadException($"Senaryo dosyasi bulunamadi: {filePath}");
         }
 
         try
         {
             var json = File.ReadAllText(filePath);
             var config = JsonSerializer.Deserialize<ScenarioJsonConfig>(json, JsonOptions)
-                ?? throw new ScenarioLoadException("Scenario JSON icerigi bos veya okunamiyor.");
+                ?? throw new ScenarioLoadException("Senaryo JSON icerigi bos veya okunamiyor.");
 
             return BuildScenario(config);
         }
         catch (JsonException ex)
         {
-            throw new ScenarioLoadException($"Scenario JSON parse hatasi: {ex.Message}");
+            throw new ScenarioLoadException($"Senaryo JSON ayristirma hatasi: {ex.Message}");
         }
         catch (IOException ex)
         {
-            throw new ScenarioLoadException($"Scenario dosyasi okunamadi: {ex.Message}");
+            throw new ScenarioLoadException($"Senaryo dosyasi okunamadi: {ex.Message}");
         }
     }
 
@@ -85,12 +85,12 @@ public sealed class ScenarioLoader
     {
         if (config.Scenario is null || config.Road is null || config.Simulation is null || config.Vehicles is null)
         {
-            throw new ScenarioLoadException("Scenario JSON zorunlu alanlari icermiyor (scenario, road, simulation, vehicles).");
+            throw new ScenarioLoadException("Senaryo JSON zorunlu alanlari icermiyor (scenario, road, simulation, vehicles).");
         }
 
         if (string.IsNullOrWhiteSpace(config.Scenario.Name))
         {
-            throw new ScenarioLoadException("Scenario name alani bos olamaz.");
+            throw new ScenarioLoadException("Senaryo adi alani bos olamaz.");
         }
     }
 
@@ -98,7 +98,7 @@ public sealed class ScenarioLoader
     {
         if (road.LengthMeters <= 0)
         {
-            throw new ScenarioLoadException("Road length 0'dan buyuk olmali.");
+            throw new ScenarioLoadException("Yol uzunlugu 0'dan buyuk olmali.");
         }
 
         if (road.SensorPositionsMeters.Count == 0)
@@ -107,8 +107,8 @@ public sealed class ScenarioLoader
         }
 
         ValidatePositions("Sensor", road.SensorPositionsMeters, road.LengthMeters);
-        ValidatePositions("Pocket", road.PocketPositionsMeters, road.LengthMeters);
-        ValidatePositions("Depot", road.DepotPositionsMeters, road.LengthMeters);
+        ValidatePositions("Cep", road.PocketPositionsMeters, road.LengthMeters);
+        ValidatePositions("Depo", road.DepotPositionsMeters, road.LengthMeters);
     }
 
     private static void ValidateSimulation(SimulationJsonConfig simulation)
@@ -151,13 +151,13 @@ public sealed class ScenarioLoader
             if (vehicle.PositionMeters < 0 || vehicle.PositionMeters > road.LengthMeters)
             {
                 throw new ScenarioLoadException(
-                    $"Arac {vehicle.Id} icin gecersiz baslangic konumu: {vehicle.PositionMeters}m (Road: 0-{road.LengthMeters}).");
+                    $"Arac {vehicle.Id} icin gecersiz baslangic konumu: {vehicle.PositionMeters}m (Yol: 0-{road.LengthMeters}).");
             }
 
             if (vehicle.SpeedKmh < 0 || vehicle.SpeedKmh > Vehicle.MaxSpeedKmh)
             {
                 throw new ScenarioLoadException(
-                    $"Arac {vehicle.Id} icin gecersiz hiz: {vehicle.SpeedKmh} km/h (Max: {Vehicle.MaxSpeedKmh}).");
+                    $"Arac {vehicle.Id} icin gecersiz hiz: {vehicle.SpeedKmh} km/h (Maks: {Vehicle.MaxSpeedKmh}).");
             }
 
             if (!depotSet.Contains(vehicle.TargetDepotPositionMeters))
@@ -176,7 +176,7 @@ public sealed class ScenarioLoader
             if (count > pocket.Capacity)
             {
                 throw new ScenarioLoadException(
-                    $"Pocket kapasitesi asildi: {pocket.PositionMeters}m konumunda {count} arac var (Kapasite: {pocket.Capacity}).");
+                    $"Cep kapasitesi asildi: {pocket.PositionMeters}m konumunda {count} arac var (Kapasite: {pocket.Capacity}).");
             }
         }
 
@@ -186,7 +186,7 @@ public sealed class ScenarioLoader
             if (count > depot.Capacity)
             {
                 throw new ScenarioLoadException(
-                    $"Depot kapasitesi asildi: {depot.PositionMeters}m konumunda {count} arac var (Kapasite: {depot.Capacity}).");
+                    $"Depo kapasitesi asildi: {depot.PositionMeters}m konumunda {count} arac var (Kapasite: {depot.Capacity}).");
             }
         }
     }

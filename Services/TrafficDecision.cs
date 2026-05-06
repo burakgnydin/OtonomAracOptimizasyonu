@@ -18,7 +18,7 @@ public sealed record TrafficDecision(
     string Message,
     ManeuverDirective? ManeuverDirective = null)
 {
-    public static TrafficDecision MoveAllowed() => new(true, TrafficStopReason.None, "Move Allowed", null);
+    public static TrafficDecision MoveAllowed() => new(true, TrafficStopReason.None, "Harekete izin verildi", null);
 
     public static TrafficDecision Stop(TrafficStopReason reason, string message) => new(false, reason, message, null);
 

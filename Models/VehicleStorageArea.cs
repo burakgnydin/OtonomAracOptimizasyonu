@@ -8,12 +8,12 @@ public abstract class VehicleStorageArea
     {
         if (positionMeters < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(positionMeters), "Position cannot be negative.");
+            throw new ArgumentOutOfRangeException(nameof(positionMeters), "Konum negatif olamaz.");
         }
 
         if (capacity <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(capacity), "Capacity must be greater than zero.");
+            throw new ArgumentOutOfRangeException(nameof(capacity), "Kapasite sifirdan buyuk olmalidir.");
         }
 
         PositionMeters = positionMeters;
@@ -46,7 +46,7 @@ public abstract class VehicleStorageArea
     {
         if (string.IsNullOrWhiteSpace(vehicleId))
         {
-            throw new ArgumentException("Vehicle id cannot be empty.", nameof(vehicleId));
+            throw new ArgumentException("Arac kimligi bos olamaz.", nameof(vehicleId));
         }
 
         return _vehicleIds.Remove(vehicleId);
@@ -56,9 +56,14 @@ public abstract class VehicleStorageArea
     {
         if (string.IsNullOrWhiteSpace(vehicleId))
         {
-            throw new ArgumentException("Vehicle id cannot be empty.", nameof(vehicleId));
+            throw new ArgumentException("Arac kimligi bos olamaz.", nameof(vehicleId));
         }
 
         return _vehicleIds.Contains(vehicleId);
+    }
+
+    public void ResetOccupancy()
+    {
+        _vehicleIds.Clear();
     }
 }

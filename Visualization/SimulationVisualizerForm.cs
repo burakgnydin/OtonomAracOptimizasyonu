@@ -11,7 +11,6 @@ public sealed class SimulationVisualizerForm : Form
     private const int RoadY = 150;
     private const int SensorSize = 10;
     private const int VehicleDotSize = 12;
-    private const double SensorVisibilityToleranceMeters = 2d;
 
     private readonly Road _road;
     private readonly SimulationEngine _engine;
@@ -80,7 +79,8 @@ public sealed class SimulationVisualizerForm : Form
 
         DrawRoad(g);
         DrawSensors(g);
-        DrawVisibleVehicles(g);
+        DrawStorageAreas(g);
+        DrawVehicles(g);
     }
 
     private void OnTimerTick(object? sender, EventArgs e)
@@ -88,7 +88,7 @@ public sealed class SimulationVisualizerForm : Form
         if (_currentTick >= _maxTicks)
         {
             _timer.Stop();
-            UpdateStatusText("Maksimum tick sayisina ulasildi");
+            UpdateStatusText("Maksimum adim sayisina ulasildi");
             return;
         }
 
@@ -96,14 +96,14 @@ public sealed class SimulationVisualizerForm : Form
         _currentTick = report.TickIndex;
         _currentStates = report.VehicleStates;
 
-        UpdateStatusText($"Tick: {_currentTick}/{_maxTicks}  |  Simulasyon Saati: {report.SimulationTime:hh\\:mm\\:ss}");
+        UpdateStatusText($"Adim: {_currentTick}/{_maxTicks}  |  Simulasyon Saati: {report.SimulationTime:hh\\:mm\\:ss}");
 
         Invalidate();
 
         if (_currentStates.All(state => state.ReachedTargetDepot))
         {
             _timer.Stop();
-            UpdateStatusText($"Tum araclar hedefe ulasti (tick {_currentTick})");
+            UpdateStatusText($"Tum araclar hedefe ulasti (adim {_currentTick})");
         }
     }
 
@@ -138,16 +138,41 @@ public sealed class SimulationVisualizerForm : Form
         }
     }
 
-    private void DrawVisibleVehicles(Graphics graphics)
+    private void DrawStorageAreas(Graphics graphics)
     {
-        var visibleVehicles = _currentStates
-            .Where(state => IsVehicleVisibleAtAnySensor(state.PositionMeters))
+        using var pocketBrush = new SolidBrush(Color.Khaki);
+        using var depotBrush = new SolidBrush(Color.LightSteelBlue);
+        using var outlinePen = new Pen(Color.DimGray, 1);
+        using var font = new Font("Segoe UI", 8);
+
+        foreach (var pocket in _road.Pockets)
+        {
+            var x = MeterToPixel(pocket.PositionMeters);
+            graphics.FillRectangle(pocketBrush, x - 8, RoadY - 34, 16, 16);
+            graphics.DrawRectangle(outlinePen, x - 8, RoadY - 34, 16, 16);
+            graphics.DrawString($"C{pocket.PositionMeters} ({pocket.Occupancy}/{pocket.Capacity})", font, Brushes.Goldenrod, x - 26, RoadY - 54);
+        }
+
+        foreach (var depot in _road.Depots)
+        {
+            var x = MeterToPixel(depot.PositionMeters);
+            graphics.FillRectangle(depotBrush, x - 10, RoadY + 28, 20, 14);
+            graphics.DrawRectangle(outlinePen, x - 10, RoadY + 28, 20, 14);
+            graphics.DrawString($"D{depot.PositionMeters} ({depot.Occupancy}/{depot.Capacity})", font, Brushes.SteelBlue, x - 28, RoadY + 44);
+        }
+    }
+
+    private void DrawVehicles(Graphics graphics)
+    {
+        var orderedVehicles = _currentStates
             .OrderBy(state => state.VehicleId)
             .ToList();
 
-        for (var i = 0; i < visibleVehicles.Count; i++)
+        using var infoFont = new Font("Segoe UI", 7);
+
+        for (var i = 0; i < orderedVehicles.Count; i++)
         {
-            var vehicle = visibleVehicles[i];
+            var vehicle = orderedVehicles[i];
             var x = MeterToPixel(vehicle.PositionMeters);
             var y = RoadY - 22 - ((i % 3) * 16);
             using var brush = new SolidBrush(GetColorForVehicle(vehicle.VehicleId));
@@ -157,12 +182,11 @@ public sealed class SimulationVisualizerForm : Form
                 y - (VehicleDotSize / 2),
                 VehicleDotSize,
                 VehicleDotSize);
-        }
-    }
 
-    private bool IsVehicleVisibleAtAnySensor(double vehiclePositionMeters)
-    {
-        return _road.Sensors.Any(sensor => Math.Abs(vehiclePositionMeters - sensor.PositionMeters) <= SensorVisibilityToleranceMeters);
+            var loadText = vehicle.HasLoad ? "Yuklu" : "Yuksuz";
+            var info = $"{vehicle.VehicleId} | {vehicle.CurrentTask} | {loadText} | Gorev:{vehicle.CompletedMissionCount}";
+            graphics.DrawString(info, infoFont, Brushes.Black, x + 6, y - 8);
+        }
     }
 
     private int MeterToPixel(double meters)

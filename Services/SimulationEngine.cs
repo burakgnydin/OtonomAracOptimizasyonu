@@ -5,8 +5,11 @@ namespace OtonomAracOptimizasyonu.Services;
 public sealed class SimulationEngine
 {
     private const double DepotReachToleranceMeters = 0.001d;
+    private const int DepotLoadingTicks = 3;
     private readonly Dictionary<string, int> _homeDepotByVehicleId;
+    private readonly Dictionary<string, int> _missionDepotByVehicleId;
     private readonly Dictionary<string, double> _cruiseSpeedByVehicleId;
+    private readonly Dictionary<string, int> _loadingTicksRemainingByVehicleId = new();
     private readonly List<Vehicle> _vehicles;
 
     public SimulationEngine(
@@ -27,6 +30,7 @@ public sealed class SimulationEngine
         _homeDepotByVehicleId = _vehicles.ToDictionary(
             v => v.Id,
             v => FindNearestDepotPosition(v.PositionMeters, road));
+        _missionDepotByVehicleId = _vehicles.ToDictionary(v => v.Id, v => v.TargetDepotPositionMeters);
         _cruiseSpeedByVehicleId = _vehicles.ToDictionary(v => v.Id, v => v.SpeedKmh);
     }
 
@@ -42,16 +46,24 @@ public sealed class SimulationEngine
 
     public SimulationTickReport Tick()
     {
+        RefreshStorageOccupancy();
         TrafficController.UpdateTrafficState(_vehicles, Road);
         TickCount++;
         var vehicleStates = new List<VehicleTickState>(_vehicles.Count);
 
         foreach (var vehicle in _vehicles)
         {
+            if (vehicle.CurrentTask == VehicleTask.LoadingAtDepot)
+            {
+                var loadingStatus = ProcessDepotLoading(vehicle);
+                vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.None, loadingStatus));
+                continue;
+            }
+
             if (vehicle.CurrentTask == VehicleTask.NormalDrive && HasReachedTargetDepot(vehicle))
             {
                 HandleVehicleAtTargetDepot(vehicle);
-                vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.None, "At Target Depot"));
+                vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.None, "Hedef depoda"));
                 continue;
             }
 
@@ -60,18 +72,18 @@ public sealed class SimulationEngine
             {
                 ApplyManeuverDirective(vehicle, trafficDecision.ManeuverDirective);
                 SimulationLogger.Log(
-                    $"Vehicle {vehicle.Id} retreating to {trafficDecision.ManeuverDirective.SafeAreaType} " +
-                    $"at {trafficDecision.ManeuverDirective.SafeAreaPositionMeters}m.");
+                    $"Arac {vehicle.Id}, {trafficDecision.ManeuverDirective.SafeAreaPositionMeters}m konumundaki " +
+                    $"{trafficDecision.ManeuverDirective.SafeAreaType} bolgesine geri cekiliyor.");
                 vehicleStates.Add(CreateTickState(
                     vehicle,
                     TrafficStopReason.DeadlockAvoidance,
-                    $"Vehicle {vehicle.Id} is retreating to {trafficDecision.ManeuverDirective.SafeAreaType} at {trafficDecision.ManeuverDirective.SafeAreaPositionMeters}m to resolve deadlock."));
+                    $"Arac {vehicle.Id}, kilitlenmeyi cozmek icin {trafficDecision.ManeuverDirective.SafeAreaPositionMeters}m konumundaki {trafficDecision.ManeuverDirective.SafeAreaType} bolgesine geri cekiliyor."));
                 continue;
             }
 
             if (!trafficDecision.CanMove)
             {
-                vehicleStates.Add(CreateTickState(vehicle, trafficDecision.StopReason, $"Waiting: {trafficDecision.Message}"));
+                vehicleStates.Add(CreateTickState(vehicle, trafficDecision.StopReason, $"Bekliyor: {trafficDecision.Message}"));
                 continue;
             }
 
@@ -88,46 +100,76 @@ public sealed class SimulationEngine
                 if (vehicle.CurrentTask == VehicleTask.RetreatingToSafeArea)
                 {
                     vehicle.MarkWaitingInSafeArea();
-                    SimulationLogger.Log($"Vehicle {vehicle.Id} entered safe area at {vehicle.PositionMeters:0.0}m and is waiting.");
-                    vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.DeadlockAvoidance, "Waiting in Safe Area"));
+                    SimulationLogger.Log($"Arac {vehicle.Id}, {vehicle.PositionMeters:0.0}m guvenli alana girdi ve bekliyor.");
+                    vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.DeadlockAvoidance, "Guvenli alanda bekliyor"));
                     continue;
                 }
 
                 HandleVehicleAtTargetDepot(vehicle);
-                vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.None, "Reached Target Depot"));
+                vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.None, "Hedef depoya ulasti"));
                 continue;
             }
 
-            vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.None, "Moving"));
+            vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.None, "Hareket ediyor"));
         }
 
+        RefreshStorageOccupancy();
         var simulationTime = TimeSpan.FromSeconds(TickCount * TrafficController.TickDurationSeconds);
         return new SimulationTickReport(TickCount, simulationTime, vehicleStates);
     }
 
     private void HandleVehicleAtTargetDepot(Vehicle vehicle)
     {
-        vehicle.UpdateSpeed(0);
+        var homeDepot = _homeDepotByVehicleId[vehicle.Id];
+        var missionDepot = _missionDepotByVehicleId[vehicle.Id];
+        var atHomeDepot = Math.Abs(vehicle.PositionMeters - homeDepot) < DepotReachToleranceMeters;
+        var atMissionDepot = Math.Abs(vehicle.PositionMeters - missionDepot) < DepotReachToleranceMeters;
+
+        vehicle.RegisterDepotVisit((int)Math.Round(vehicle.PositionMeters, MidpointRounding.AwayFromZero));
+
+        if (!vehicle.HasLoad && atMissionDepot)
+        {
+            vehicle.StartDepotLoading();
+            _loadingTicksRemainingByVehicleId[vehicle.Id] = DepotLoadingTicks;
+            SimulationLogger.Log($"Arac {vehicle.Id}, {vehicle.PositionMeters:0.0}m depoya girerek yukleme islemini baslatti.");
+            return;
+        }
+
+        if (vehicle.HasLoad && atHomeDepot)
+        {
+            vehicle.CompleteDeliveryCycle();
+            SimulationLogger.Log($"Arac {vehicle.Id}, {vehicle.PositionMeters:0.0}m depoda yuku teslim etti (Tamamlanan gorev: {vehicle.CompletedMissionCount}).");
+
+            if (!EnableReturnTrip || vehicle.SingleMissionOnly)
+            {
+                vehicle.UpdateSpeed(0);
+                return;
+            }
+
+            var outboundTarget = _missionDepotByVehicleId[vehicle.Id];
+            vehicle.UpdateTargetDepot(outboundTarget);
+            vehicle.UpdateDirection(outboundTarget >= vehicle.PositionMeters
+                ? VehicleDirection.LeftToRight
+                : VehicleDirection.RightToLeft);
+            vehicle.UpdateSpeed(_cruiseSpeedByVehicleId[vehicle.Id]);
+            SimulationLogger.Log($"Arac {vehicle.Id}, yeni gorev icin {outboundTarget}m hedef depoya yoneldi.");
+            return;
+        }
 
         if (!EnableReturnTrip || vehicle.SingleMissionOnly)
         {
-            SimulationLogger.Log($"Vehicle {vehicle.Id} completed single mission at depot {vehicle.PositionMeters:0.0}m.");
+            vehicle.UpdateSpeed(0);
+            SimulationLogger.Log($"Arac {vehicle.Id}, tek yon gorevini {vehicle.PositionMeters:0.0}m depoda tamamladi.");
             return;
         }
 
         var returnTarget = _homeDepotByVehicleId[vehicle.Id];
-        if (vehicle.TargetDepotPositionMeters == returnTarget)
-        {
-            return;
-        }
-
-        var currentDirection = vehicle.Direction;
-        vehicle.UpdateDirection(currentDirection == VehicleDirection.LeftToRight
-            ? VehicleDirection.RightToLeft
-            : VehicleDirection.LeftToRight);
-
+        vehicle.UpdateDirection(returnTarget >= vehicle.PositionMeters
+            ? VehicleDirection.LeftToRight
+            : VehicleDirection.RightToLeft);
         vehicle.UpdateTargetDepot(returnTarget);
         vehicle.UpdateSpeed(_cruiseSpeedByVehicleId[vehicle.Id]);
+        SimulationLogger.Log($"Arac {vehicle.Id}, yuklu donus gorevi icin {returnTarget}m baslangic deposuna yoneldi.");
     }
 
     private bool HasReachedTargetDepot(Vehicle vehicle)
@@ -167,6 +209,9 @@ public sealed class SimulationEngine
             vehicle.Direction,
             vehicle.TargetDepotPositionMeters,
             Math.Abs(vehicle.PositionMeters - vehicle.TargetDepotPositionMeters) < DepotReachToleranceMeters,
+            vehicle.CurrentTask,
+            vehicle.HasLoad,
+            vehicle.CompletedMissionCount,
             reason,
             statusMessage);
     }
@@ -174,5 +219,64 @@ public sealed class SimulationEngine
     private static void ApplyManeuverDirective(Vehicle vehicle, ManeuverDirective directive)
     {
         vehicle.StartRetreatManeuver(directive.SafeAreaPositionMeters, directive.YieldToVehicleId);
+    }
+
+    private string ProcessDepotLoading(Vehicle vehicle)
+    {
+        if (!_loadingTicksRemainingByVehicleId.TryGetValue(vehicle.Id, out var remaining))
+        {
+            remaining = DepotLoadingTicks;
+        }
+
+        remaining--;
+        if (remaining > 0)
+        {
+            _loadingTicksRemainingByVehicleId[vehicle.Id] = remaining;
+            return $"Depoda yukleniyor ({remaining} adim kaldi)";
+        }
+
+        _loadingTicksRemainingByVehicleId.Remove(vehicle.Id);
+        vehicle.FinishLoadingAndCarryLoad();
+
+        var returnTarget = _homeDepotByVehicleId[vehicle.Id];
+        vehicle.UpdateTargetDepot(returnTarget);
+        vehicle.UpdateDirection(returnTarget >= vehicle.PositionMeters
+            ? VehicleDirection.LeftToRight
+            : VehicleDirection.RightToLeft);
+        vehicle.UpdateSpeed(_cruiseSpeedByVehicleId[vehicle.Id]);
+        SimulationLogger.Log($"Arac {vehicle.Id}, yuklemeyi tamamlayip {returnTarget}m konumundaki baslangic deposuna donus icin cikti.");
+        return "Yukleme tamamlandi, donuse geciliyor";
+    }
+
+    private void RefreshStorageOccupancy()
+    {
+        foreach (var pocket in Road.Pockets)
+        {
+            pocket.ResetOccupancy();
+        }
+
+        foreach (var depot in Road.Depots)
+        {
+            depot.ResetOccupancy();
+        }
+
+        foreach (var vehicle in _vehicles)
+        {
+            foreach (var pocket in Road.Pockets)
+            {
+                if (Math.Abs(vehicle.PositionMeters - pocket.PositionMeters) < DepotReachToleranceMeters)
+                {
+                    pocket.TryAddVehicle(vehicle);
+                }
+            }
+
+            foreach (var depot in Road.Depots)
+            {
+                if (Math.Abs(vehicle.PositionMeters - depot.PositionMeters) < DepotReachToleranceMeters)
+                {
+                    depot.TryAddVehicle(vehicle);
+                }
+            }
+        }
     }
 }

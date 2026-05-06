@@ -4,5 +4,6 @@ public enum VehicleTask
 {
     NormalDrive = 0,
     RetreatingToSafeArea = 1,
-    WaitingInSafeArea = 2
+    WaitingInSafeArea = 2,
+    LoadingAtDepot = 3
 }

@@ -17,7 +17,7 @@ public sealed class TrafficController
 
         if (tickDurationSeconds <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(tickDurationSeconds), "Tick duration must be greater than zero.");
+            throw new ArgumentOutOfRangeException(nameof(tickDurationSeconds), "Tick suresi sifirdan buyuk olmalidir.");
         }
 
         TrafficStrategy = trafficStrategy;
@@ -59,7 +59,7 @@ public sealed class TrafficController
     {
         if (!_restrictedStateByVehicleId.TryGetValue(vehicle.Id, out var currentVehicleState))
         {
-            throw new InvalidOperationException($"Restricted state could not be found for vehicle {vehicle.Id}.");
+            throw new InvalidOperationException($"Arac {vehicle.Id} icin kisitli durum bulunamadi.");
         }
 
         return TrafficStrategy.Evaluate(
@@ -108,7 +108,7 @@ public sealed class TrafficController
             foreach (var sensorId in crossedSensors)
             {
                 RegisterSensorTrigger(sensorId, currentTime);
-                SimulationLogger.Log($"Vehicle {vehicle.Id} detected at Sensor {sensorId}m, calculating trajectory...");
+                SimulationLogger.Log($"Arac {vehicle.Id}, {sensorId}m sensorunde algilandi; trajektori hesaplaniyor...");
             }
 
             if (PreviousSensorId.HasValue && LastSensorId.HasValue && PreviousSensorId != LastSensorId)

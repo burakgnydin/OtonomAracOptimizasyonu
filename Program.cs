@@ -6,9 +6,9 @@ Application.SetCompatibleTextRenderingDefault(false);
 
 var loader = new ScenarioLoader();
 var scenario = LoadScenario(loader, args);
-SimulationLogger.Log($"Scenario loaded: {scenario.Name}");
+SimulationLogger.Log($"Senaryo yuklendi: {scenario.Name}");
 SimulationLogger.Log(
-    $"Road={scenario.Road.LengthMeters}m | Sensors={scenario.Road.Sensors.Count} | Pockets={scenario.Road.Pockets.Count} | Depots={scenario.Road.Depots.Count} | Vehicles={scenario.Vehicles.Count}");
+    $"Yol={scenario.Road.LengthMeters}m | Sensorler={scenario.Road.Sensors.Count} | Cepler={scenario.Road.Pockets.Count} | Depolar={scenario.Road.Depots.Count} | Araclar={scenario.Vehicles.Count}");
 var strategy = new SafetyFirstTrafficStrategy();
 var controller = new TrafficController(strategy, scenario.TickDurationSeconds);
 var engine = new SimulationEngine(scenario.Road, scenario.Vehicles, controller, scenario.EnableReturnTrip);
@@ -33,7 +33,7 @@ static ScenarioDefinition LoadScenario(ScenarioLoader loader, string[] args)
     catch (ScenarioLoadException ex)
     {
         MessageBox.Show(
-            $"Scenario yuklenemedi:\n{ex.Message}",
+            $"Senaryo yuklenemedi:\n{ex.Message}",
             "Yukleme Hatasi",
             MessageBoxButtons.OK,
             MessageBoxIcon.Error);

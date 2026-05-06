@@ -6,7 +6,7 @@ public sealed record Sensor
     {
         if (positionMeters < 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(positionMeters), "Sensor position cannot be negative.");
+            throw new ArgumentOutOfRangeException(nameof(positionMeters), "Sensor konumu negatif olamaz.");
         }
 
         PositionMeters = positionMeters;

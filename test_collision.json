@@ -1,7 +1,7 @@
 {
   "scenario": {
-    "name": "Collision Threshold Test",
-    "description": "Iki arac karsi yonde hareket ederek 20m guvenlik esigini test eder."
+    "name": "Carpisma Esigi Testi",
+    "description": "Iki arac zit yonde hareket ederek 20m guvenlik esigini test eder."
   },
   "road": {
     "lengthMeters": 240,

@@ -1,7 +1,7 @@
 {
   "scenario": {
-    "name": "Deadlock Narrow Segment Test",
-    "description": "Iki arac cep olmayan dar segmentte karsi karsiya gelerek deadlock davranisini test eder."
+    "name": "Kilitlenme Dar Segment Testi",
+    "description": "Iki arac cep olmayan dar segmentte karsi karsiya gelerek kilitlenme davranisini test eder."
   },
   "road": {
     "lengthMeters": 240,

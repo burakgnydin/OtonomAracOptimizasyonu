@@ -12,7 +12,7 @@ public sealed class Road
     {
         if (lengthMeters <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(lengthMeters), "Road length must be greater than zero.");
+            throw new ArgumentOutOfRangeException(nameof(lengthMeters), "Yol uzunlugu sifirdan buyuk olmalidir.");
         }
 
         ArgumentNullException.ThrowIfNull(sensors);

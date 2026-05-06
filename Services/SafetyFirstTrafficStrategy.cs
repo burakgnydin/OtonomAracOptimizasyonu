@@ -22,14 +22,14 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
 
         if (tickDurationSeconds <= 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(tickDurationSeconds), "Tick duration must be greater than zero.");
+            throw new ArgumentOutOfRangeException(nameof(tickDurationSeconds), "Tick suresi sifirdan buyuk olmalidir.");
         }
 
         if (vehicle.CurrentTask == VehicleTask.WaitingInSafeArea)
         {
             return CanExitSafeArea(vehicle, trafficState)
                 ? TrafficDecision.MoveAllowed()
-                : TrafficDecision.Stop(TrafficStopReason.DeadlockAvoidance, "Waiting In Safe Area");
+                : TrafficDecision.Stop(TrafficStopReason.DeadlockAvoidance, "Guvenli alanda bekliyor");
         }
 
         if (ShouldStartSensorBasedManeuver(vehicle, currentVehicleState))
@@ -49,7 +49,7 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
 
         if (ViolatesMinimumGapWithSameDirectionVehicles(currentVehicleState, predictedPosition, requiredGap, sameDirectionVehicles))
         {
-            return TrafficDecision.Stop(TrafficStopReason.CollisionRisk, "Collision Risk (Same Direction)");
+            return TrafficDecision.Stop(TrafficStopReason.CollisionRisk, "Carpisma riski (ayni yon)");
         }
 
         var oppositeDirectionVehicles = trafficState
@@ -69,12 +69,12 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
                 return maneuverDecision;
             }
 
-            return TrafficDecision.Stop(TrafficStopReason.CollisionRisk, "Collision Risk (Opposite Direction)");
+            return TrafficDecision.Stop(TrafficStopReason.CollisionRisk, "Carpisma riski (zit yon)");
         }
 
         if (TriggersDeadlockWait(vehicle, currentVehicleState, oppositeDirectionVehicles, road))
         {
-            return TrafficDecision.Stop(TrafficStopReason.DeadlockAvoidance, "Deadlock Avoidance");
+            return TrafficDecision.Stop(TrafficStopReason.DeadlockAvoidance, "Kilitlenme onleme");
         }
 
         return TrafficDecision.MoveAllowed();
@@ -102,11 +102,11 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             return null;
         }
 
-        var safeAreaType = safeArea is Pocket ? "Pocket" : "Depot";
+        var safeAreaType = safeArea is Pocket ? "Cep" : "Depo";
         var directive = new ManeuverDirective(safeArea.PositionMeters, oncomingVehicle.VehicleId, safeAreaType);
         return TrafficDecision.StartManeuver(
             directive,
-            $"Retreat to {safeAreaType} at {safeArea.PositionMeters}m to resolve deadlock");
+            $"Kilitlenmeyi cozmek icin {safeArea.PositionMeters}m konumundaki {safeAreaType} alanina geri cekil");
     }
 
     private static VehicleStorageArea? FindNearestAvailableSafeArea(VehicleRestrictedState currentVehicleState, Road road)
@@ -178,14 +178,14 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             return null;
         }
 
-        var safeAreaType = safeArea is Pocket ? "Pocket" : "Depot";
+        var safeAreaType = safeArea is Pocket ? "Cep" : "Depo";
         var directive = new ManeuverDirective(safeArea.PositionMeters, AssumedOncomingVehicleId, safeAreaType);
         SimulationLogger.Log(
-            $"Vehicle {currentVehicleState.VehicleId} timeout at sensor {currentVehicleState.ActiveSensorId}m. " +
-            $"Assuming oncoming traffic, maneuvering to {safeAreaType} {safeArea.PositionMeters}m.");
+            $"Arac {currentVehicleState.VehicleId}, {currentVehicleState.ActiveSensorId}m sensorunde zaman asimina ugradi. " +
+            $"Karsi trafik varsayiliyor; {safeArea.PositionMeters}m konumundaki {safeAreaType} alanina manevra yapiliyor.");
         return TrafficDecision.StartManeuver(
             directive,
-            $"Sensor timeout near {currentVehicleState.ActiveSensorId}m, retreating to {safeAreaType} at {safeArea.PositionMeters}m");
+            $"Sensor zaman asimi ({currentVehicleState.ActiveSensorId}m), {safeArea.PositionMeters}m konumundaki {safeAreaType} alanina geri cekiliyor");
     }
 
     private static bool ViolatesMinimumGapWithSameDirectionVehicles(

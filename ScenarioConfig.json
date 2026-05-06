@@ -1,7 +1,7 @@
 {
   "scenario": {
-    "name": "Homework Default (3 Vehicles)",
-    "description": "L=240m yol uzerinde odev varsayilan senaryosu."
+    "name": "Odev Varsayilan Senaryosu (3 Arac)",
+    "description": "L=240m yol uzerinde odev icin varsayilan senaryo."
   },
   "road": {
     "lengthMeters": 240,

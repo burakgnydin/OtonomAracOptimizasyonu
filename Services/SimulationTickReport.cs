@@ -9,6 +9,9 @@ public sealed record VehicleTickState(
     VehicleDirection Direction,
     int TargetDepotPositionMeters,
     bool ReachedTargetDepot,
+    VehicleTask CurrentTask,
+    bool HasLoad,
+    int CompletedMissionCount,
     TrafficStopReason StopReason,
     string StatusMessage);
 

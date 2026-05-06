@@ -1,7 +1,7 @@
 {
   "scenario": {
-    "name": "Invalid Position Test",
-    "description": "Arac baslangic konumu yol uzunlugunu asiyor."
+    "name": "Gecersiz Konum Testi",
+    "description": "Arac baslangic konumu yol uzunlugunu asar."
   },
   "road": {
     "lengthMeters": 240,
