@@ -1,7 +1,7 @@
 {
   "scenario": {
-    "name": "Gecersiz Konum Testi",
-    "description": "Arac baslangic konumu yol uzunlugunu asar."
+    "name": "Dinamik Baslangic Dagilimi Testi",
+    "description": "Araclar yol uzerinde farkli konum ve yonlerde baslatilarak dinamik gorev dagilimi ve depo ziyaret kisiti test edilir."
   },
   "road": {
     "lengthMeters": 240,
@@ -11,15 +11,38 @@
   },
   "simulation": {
     "tickDurationSeconds": 1.0,
-    "maxTicks": 30,
-    "enableReturnTrip": false
+    "maxTicks": 150,
+    "enableReturnTrip": true
   },
   "vehicles": [
     {
       "id": "V1",
       "direction": "LeftToRight",
-      "positionMeters": 300,
+      "positionMeters": 0,
+      "speedKmh": 11,
+      "targetDepotPositionMeters": 240,
+      "isPriority": true,
+      "singleMissionOnly": true
+    },
+    {
+      "id": "V2",
+      "direction": "RightToLeft",
+      "positionMeters": 240,
       "speedKmh": 10,
+      "targetDepotPositionMeters": 70
+    },
+    {
+      "id": "V3",
+      "direction": "LeftToRight",
+      "positionMeters": 70,
+      "speedKmh": 9,
+      "targetDepotPositionMeters": 120
+    },
+    {
+      "id": "V4",
+      "direction": "RightToLeft",
+      "positionMeters": 200,
+      "speedKmh": 7,
       "targetDepotPositionMeters": 120
     }
   ]

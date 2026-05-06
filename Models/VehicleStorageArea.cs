@@ -3,6 +3,7 @@ namespace OtonomAracOptimizasyonu.Models;
 public abstract class VehicleStorageArea
 {
     private readonly HashSet<string> _vehicleIds = [];
+    private readonly HashSet<string> _reservedVehicleIds = [];
 
     protected VehicleStorageArea(int positionMeters, int capacity)
     {
@@ -26,7 +27,11 @@ public abstract class VehicleStorageArea
 
     public int Occupancy => _vehicleIds.Count;
 
+    public int ReservationCount => _reservedVehicleIds.Count;
+
     public bool IsFull => Occupancy >= Capacity;
+
+    public bool IsFullyAllocated => (Occupancy + ReservationCount) >= Capacity;
 
     public IReadOnlyCollection<string> VehicleIds => _vehicleIds;
 
@@ -60,6 +65,46 @@ public abstract class VehicleStorageArea
         }
 
         return _vehicleIds.Contains(vehicleId);
+    }
+
+    public bool HasReservation(string vehicleId)
+    {
+        if (string.IsNullOrWhiteSpace(vehicleId))
+        {
+            throw new ArgumentException("Arac kimligi bos olamaz.", nameof(vehicleId));
+        }
+
+        return _reservedVehicleIds.Contains(vehicleId);
+    }
+
+    public bool TryReserveSlot(string vehicleId)
+    {
+        if (string.IsNullOrWhiteSpace(vehicleId))
+        {
+            throw new ArgumentException("Arac kimligi bos olamaz.", nameof(vehicleId));
+        }
+
+        if (_reservedVehicleIds.Contains(vehicleId))
+        {
+            return true;
+        }
+
+        if ((Occupancy + ReservationCount) >= Capacity)
+        {
+            return false;
+        }
+
+        return _reservedVehicleIds.Add(vehicleId);
+    }
+
+    public bool ReleaseReservation(string vehicleId)
+    {
+        if (string.IsNullOrWhiteSpace(vehicleId))
+        {
+            throw new ArgumentException("Arac kimligi bos olamaz.", nameof(vehicleId));
+        }
+
+        return _reservedVehicleIds.Remove(vehicleId);
     }
 
     public void ResetOccupancy()

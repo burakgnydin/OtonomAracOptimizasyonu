@@ -107,8 +107,10 @@ public sealed class TrafficController
 
             foreach (var sensorId in crossedSensors)
             {
-                RegisterSensorTrigger(sensorId, currentTime);
-                SimulationLogger.Log($"Arac {vehicle.Id}, {sensorId}m sensorunde algilandi; trajektori hesaplaniyor...");
+                if (RegisterSensorTrigger(sensorId, currentTime))
+                {
+                    SimulationLogger.Log($"Arac {vehicle.Id}, {sensorId}m sensorunde algilandi; trajektori hesaplaniyor...");
+                }
             }
 
             if (PreviousSensorId.HasValue && LastSensorId.HasValue && PreviousSensorId != LastSensorId)
@@ -179,18 +181,18 @@ public sealed class TrafficController
             return Math.Max(2d, Math.Min(40d, 2d + (driftMeters * 0.35d)));
         }
 
-        private void RegisterSensorTrigger(int sensorId, TimeSpan currentTime)
+        private bool RegisterSensorTrigger(int sensorId, TimeSpan currentTime)
         {
             if (LastSensorId == sensorId && LastSensorTriggeredAt.HasValue)
             {
-                LastSensorTriggeredAt = currentTime;
-                return;
+                return false;
             }
 
             PreviousSensorId = LastSensorId;
             PreviousSensorTriggeredAt = LastSensorTriggeredAt;
             LastSensorId = sensorId;
             LastSensorTriggeredAt = currentTime;
+            return true;
         }
 
         private void RefreshSensorSignal(IReadOnlyList<int> orderedSensors, TimeSpan currentTime)
@@ -235,7 +237,7 @@ public sealed class TrafficController
         {
             if (Math.Abs(currentPosition - previousPosition) < 0.0001d)
             {
-                return Math.Abs(currentPosition - sensorPosition) <= SensorVisibilityToleranceMeters;
+                return false;
             }
 
             var min = Math.Min(previousPosition, currentPosition);

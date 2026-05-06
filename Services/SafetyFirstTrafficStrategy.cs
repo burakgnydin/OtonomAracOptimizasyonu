@@ -5,6 +5,7 @@ namespace OtonomAracOptimizasyonu.Services;
 public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
 {
     public const double MinimumDistanceMeters = 20d;
+    private const double ProactiveManeuverWindowMeters = 60d;
     private const double UncertaintyBufferMultiplier = 0.5d;
     private const string AssumedOncomingVehicleId = "ASSUMED_ONCOMING";
 
@@ -30,6 +31,16 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             return CanExitSafeArea(vehicle, trafficState)
                 ? TrafficDecision.MoveAllowed()
                 : TrafficDecision.Stop(TrafficStopReason.DeadlockAvoidance, "Guvenli alanda bekliyor");
+        }
+
+        if (vehicle.CurrentTask == VehicleTask.RetreatingToSafeArea)
+        {
+            return TrafficDecision.MoveAllowed();
+        }
+
+        if (vehicle.CurrentTask == VehicleTask.LoadingAtDepot)
+        {
+            return TrafficDecision.Stop(TrafficStopReason.None, "Yukleme islemi devam ediyor");
         }
 
         if (ShouldStartSensorBasedManeuver(vehicle, currentVehicleState))
@@ -61,6 +72,12 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             .OrderBy(other => Math.Abs(other.EstimatedPositionMeters - currentVehicleState.EstimatedPositionMeters))
             .FirstOrDefault();
 
+        var proactiveManeuverDecision = TryCreateProactiveManeuverDecision(vehicle, currentVehicleState, oncomingVehicle, road);
+        if (proactiveManeuverDecision is not null)
+        {
+            return proactiveManeuverDecision;
+        }
+
         if (ViolatesMinimumGapWithOppositeDirectionVehicles(predictedPosition, requiredGap, oppositeDirectionVehicles))
         {
             var maneuverDecision = TryCreateManeuverDecision(vehicle, currentVehicleState, oncomingVehicle, road);
@@ -91,12 +108,12 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             return null;
         }
 
-        if (vehicle.CurrentTask == VehicleTask.RetreatingToSafeArea || vehicle.CurrentTask == VehicleTask.WaitingInSafeArea)
+        if (vehicle.CurrentTask != VehicleTask.NormalDrive)
         {
             return null;
         }
 
-        var safeArea = FindNearestAvailableSafeArea(currentVehicleState, road);
+        var safeArea = FindNearestAvailableSafeArea(vehicle.Id, currentVehicleState, road);
         if (safeArea is null)
         {
             return null;
@@ -109,12 +126,12 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             $"Kilitlenmeyi cozmek icin {safeArea.PositionMeters}m konumundaki {safeAreaType} alanina geri cekil");
     }
 
-    private static VehicleStorageArea? FindNearestAvailableSafeArea(VehicleRestrictedState currentVehicleState, Road road)
+    private static VehicleStorageArea? FindNearestAvailableSafeArea(string vehicleId, VehicleRestrictedState currentVehicleState, Road road)
     {
         return road.Pockets
             .Cast<VehicleStorageArea>()
             .Concat(road.Depots)
-            .Where(area => !area.IsFull)
+            .Where(area => !area.IsFullyAllocated || area.HasReservation(vehicleId))
             .OrderBy(area => Math.Abs(area.PositionMeters - currentVehicleState.EstimatedPositionMeters))
             .FirstOrDefault();
     }
@@ -131,16 +148,6 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
 
     private static bool CanExitSafeArea(Vehicle vehicle, IReadOnlyCollection<VehicleRestrictedState> trafficState)
     {
-        // Pocket/depot icinde bekleyen arac yalnizca yol sensorlugu yesile dondugunde cikis yapar.
-        var hasAnyRedSignal = trafficState.Any(other =>
-            other.VehicleId != vehicle.Id &&
-            other.IsSensorSignalRed);
-
-        if (hasAnyRedSignal)
-        {
-            return false;
-        }
-
         if (string.IsNullOrWhiteSpace(vehicle.YieldToVehicleId))
         {
             return true;
@@ -160,6 +167,53 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
         return Math.Abs(yieldToVehicle.EstimatedPositionMeters - vehicle.ManeuverSafeAreaPositionMeters.Value) > (MinimumDistanceMeters * 2d);
     }
 
+    private static TrafficDecision? TryCreateProactiveManeuverDecision(
+        Vehicle vehicle,
+        VehicleRestrictedState currentVehicleState,
+        VehicleRestrictedState? oncomingVehicle,
+        Road road)
+    {
+        if (oncomingVehicle is null || !IsLowerPriority(vehicle, oncomingVehicle))
+        {
+            return null;
+        }
+
+        var distance = Math.Abs(oncomingVehicle.EstimatedPositionMeters - currentVehicleState.EstimatedPositionMeters);
+        if (distance > ProactiveManeuverWindowMeters)
+        {
+            return null;
+        }
+
+        if (HasSafeAreaBetween(currentVehicleState, oncomingVehicle, road))
+        {
+            return null;
+        }
+
+        var maneuverDecision = TryCreateManeuverDecision(vehicle, currentVehicleState, oncomingVehicle, road);
+        if (maneuverDecision is null)
+        {
+            return null;
+        }
+
+        return maneuverDecision with
+        {
+            Message = $"Proaktif kilitlenme onleme: {maneuverDecision.Message}"
+        };
+    }
+
+    private static bool HasSafeAreaBetween(
+        VehicleRestrictedState currentVehicleState,
+        VehicleRestrictedState oncomingVehicle,
+        Road road)
+    {
+        var segmentStart = Math.Min(currentVehicleState.EstimatedPositionMeters, oncomingVehicle.EstimatedPositionMeters);
+        var segmentEnd = Math.Max(currentVehicleState.EstimatedPositionMeters, oncomingVehicle.EstimatedPositionMeters);
+
+        return road.Pockets.Cast<VehicleStorageArea>()
+            .Concat(road.Depots)
+            .Any(area => area.PositionMeters > segmentStart && area.PositionMeters < segmentEnd);
+    }
+
     private static bool ShouldStartSensorBasedManeuver(Vehicle vehicle, VehicleRestrictedState state)
     {
         if (!state.IsSensorSignalRed || !state.NextSensorTimedOut)
@@ -172,7 +226,7 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
 
     private static TrafficDecision? CreateSensorTimeoutManeuverDecision(VehicleRestrictedState currentVehicleState, Road road)
     {
-        var safeArea = FindNearestAvailableSafeArea(currentVehicleState, road);
+        var safeArea = FindNearestAvailableSafeArea(currentVehicleState.VehicleId, currentVehicleState, road);
         if (safeArea is null)
         {
             return null;

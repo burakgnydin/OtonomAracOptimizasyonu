@@ -1,7 +1,7 @@
 {
   "scenario": {
     "name": "Carpisma Esigi Testi",
-    "description": "Iki arac zit yonde hareket ederek 20m guvenlik esigini test eder."
+    "description": "Uc aracli senaryoda zit yon karsilasmalarinda 20m guvenlik esigi ve gecis onceligi test edilir."
   },
   "road": {
     "lengthMeters": 240,
@@ -11,23 +11,30 @@
   },
   "simulation": {
     "tickDurationSeconds": 1.0,
-    "maxTicks": 20,
+    "maxTicks": 90,
     "enableReturnTrip": false
   },
   "vehicles": [
     {
       "id": "V1",
       "direction": "LeftToRight",
-      "positionMeters": 0,
-      "speedKmh": 10,
+      "positionMeters": 40,
+      "speedKmh": 12,
       "targetDepotPositionMeters": 120
     },
     {
       "id": "V2",
       "direction": "RightToLeft",
-      "positionMeters": 40,
+      "positionMeters": 160,
       "speedKmh": 10,
       "targetDepotPositionMeters": 70
+    },
+    {
+      "id": "V3",
+      "direction": "LeftToRight",
+      "positionMeters": 0,
+      "speedKmh": 8,
+      "targetDepotPositionMeters": 240
     }
   ]
 }

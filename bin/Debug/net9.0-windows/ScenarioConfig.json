@@ -1,7 +1,7 @@
 {
   "scenario": {
-    "name": "Homework Default (3 Vehicles)",
-    "description": "L=240m yol uzerinde odev varsayilan senaryosu."
+    "name": "Deadlock Onleme ve Gorev Donusu (5 Arac)",
+    "description": "Araclar depoya gidip yuk alir, baslangic konumuna doner; karsilasma riskinde cep/depo bekleme ve deadlock onleme davranisi gorulur."
   },
   "road": {
     "lengthMeters": 240,
@@ -11,7 +11,7 @@
   },
   "simulation": {
     "tickDurationSeconds": 1.0,
-    "maxTicks": 180,
+    "maxTicks": 220,
     "enableReturnTrip": true
   },
   "vehicles": [
@@ -19,7 +19,7 @@
       "id": "V1",
       "direction": "LeftToRight",
       "positionMeters": 0,
-      "speedKmh": 12,
+      "speedKmh": 10,
       "targetDepotPositionMeters": 240,
       "isPriority": true,
       "singleMissionOnly": true
@@ -28,15 +28,29 @@
       "id": "V2",
       "direction": "RightToLeft",
       "positionMeters": 240,
-      "speedKmh": 10,
+      "speedKmh": 9,
       "targetDepotPositionMeters": 70
     },
     {
       "id": "V3",
       "direction": "LeftToRight",
-      "positionMeters": 70,
+      "positionMeters": 0,
       "speedKmh": 8,
       "targetDepotPositionMeters": 120
+    },
+    {
+      "id": "V4",
+      "direction": "RightToLeft",
+      "positionMeters": 160,
+      "speedKmh": 10,
+      "targetDepotPositionMeters": 70
+    },
+    {
+      "id": "V5",
+      "direction": "LeftToRight",
+      "positionMeters": 130,
+      "speedKmh": 9,
+      "targetDepotPositionMeters": 240
     }
   ]
 }

@@ -1,7 +1,7 @@
 {
   "scenario": {
     "name": "Kilitlenme Dar Segment Testi",
-    "description": "Iki arac cep olmayan dar segmentte karsi karsiya gelerek kilitlenme davranisini test eder."
+    "description": "Uc aracli senaryoda cep olmayan dar segmentte kilitlenme riski ve cep/depo geri cekilme manevrasi test edilir."
   },
   "road": {
     "lengthMeters": 240,
@@ -11,23 +11,30 @@
   },
   "simulation": {
     "tickDurationSeconds": 1.0,
-    "maxTicks": 30,
+    "maxTicks": 120,
     "enableReturnTrip": false
   },
   "vehicles": [
     {
       "id": "V1",
       "direction": "LeftToRight",
-      "positionMeters": 85,
+      "positionMeters": 95,
       "speedKmh": 10,
       "targetDepotPositionMeters": 120
     },
     {
       "id": "V2",
       "direction": "RightToLeft",
-      "positionMeters": 115,
+      "positionMeters": 145,
       "speedKmh": 10,
       "targetDepotPositionMeters": 70
+    },
+    {
+      "id": "V3",
+      "direction": "RightToLeft",
+      "positionMeters": 220,
+      "speedKmh": 9,
+      "targetDepotPositionMeters": 120
     }
   ]
 }
