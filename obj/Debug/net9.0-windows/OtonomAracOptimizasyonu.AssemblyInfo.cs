@@ -14,7 +14,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("OtonomAracOptimizasyonu")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+1eecb44607355d5487063bcbd50f6cbfa13bb8a5")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+d79b10294bc06330532e6cb7f12cde8f85c8ac8c")]
 [assembly: System.Reflection.AssemblyProductAttribute("OtonomAracOptimizasyonu")]
 [assembly: System.Reflection.AssemblyTitleAttribute("OtonomAracOptimizasyonu")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

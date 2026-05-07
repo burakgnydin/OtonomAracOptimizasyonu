@@ -7,6 +7,7 @@ public sealed class SimulationEngine
     private const double DepotReachToleranceMeters = 0.001d;
     private const double SensorRangeMeters = 20d;
     private const double OppositeConflictRangeMeters = 30d;
+    private const int MaxYieldWaitTicks = 12;
     private const int DepotLoadingTicks = 3;
     private const int HomeUnloadingTicks = 2;
     private readonly double _minimumDistanceMeters;
@@ -14,6 +15,7 @@ public sealed class SimulationEngine
     private readonly Dictionary<string, double> _cruiseSpeedByVehicleId;
     private readonly Dictionary<string, int> _loadingTicksRemainingByVehicleId = new();
     private readonly Dictionary<string, int> _unloadingTicksRemainingByVehicleId = new();
+    private readonly Dictionary<string, int> _yieldWaitStartedTickByVehicleId = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Vehicle> _vehicles;
     private bool _startupLogged;
 
@@ -105,7 +107,7 @@ public sealed class SimulationEngine
 
             if (vehicle.CurrentTask is VehicleTask.WaitingInPocket or VehicleTask.WaitingInDepot)
             {
-                if (!HasClearanceToResume(vehicle))
+                if (!HasClearanceToResume(vehicle) && !HasWaitTimedOut(vehicle))
                 {
                     vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.DeadlockAvoidance, "Cepte bekliyor, gecis acilmadi"));
                     continue;
@@ -113,6 +115,7 @@ public sealed class SimulationEngine
 
                 ReleaseSafeAreaReservation(vehicle);
                 vehicle.ResumeOriginalMission(_cruiseSpeedByVehicleId[vehicle.Id]);
+                _yieldWaitStartedTickByVehicleId.Remove(vehicle.Id);
                 SimulationLogger.Log($"Arac {vehicle.Id}, gecis acildigi icin cepten cikarak gorevine dondu.");
             }
 
@@ -121,6 +124,7 @@ public sealed class SimulationEngine
                 if (vehicle.CurrentTask == VehicleTask.ReversingToPocket)
                 {
                     vehicle.MarkWaitingInSafeArea();
+                    _yieldWaitStartedTickByVehicleId[vehicle.Id] = TickCount;
                     NotifyPasserIfWaiting(vehicle);
                     vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.DeadlockAvoidance, "Cepte/depoda yol veriyor"));
                     continue;
@@ -448,13 +452,19 @@ public sealed class SimulationEngine
             return true;
         }
 
-        var yieldedVehicle = _vehicles.FirstOrDefault(v => string.Equals(v.Id, waitingVehicle.YieldToVehicleId, StringComparison.Ordinal));
+        var yieldedVehicle = _vehicles.FirstOrDefault(v => string.Equals(v.Id, waitingVehicle.YieldToVehicleId, StringComparison.OrdinalIgnoreCase));
         if (yieldedVehicle is null)
         {
             return true;
         }
 
         if (yieldedVehicle.CurrentTask == VehicleTask.Completed || yieldedVehicle.CurrentTask == VehicleTask.InGarage)
+        {
+            return true;
+        }
+
+        // Passer artik ana yolda degilse (yukleme/bosaltma/cep/depo bekleme) karsilasma fiilen bitmistir.
+        if (!IsOnMainLane(yieldedVehicle))
         {
             return true;
         }
@@ -471,6 +481,17 @@ public sealed class SimulationEngine
         }
 
         return Math.Abs(yieldedVehicle.PositionMeters - waitingVehicle.PositionMeters) >= clearanceDistance;
+    }
+
+    private bool HasWaitTimedOut(Vehicle waitingVehicle)
+    {
+        if (!_yieldWaitStartedTickByVehicleId.TryGetValue(waitingVehicle.Id, out var startedAt))
+        {
+            _yieldWaitStartedTickByVehicleId[waitingVehicle.Id] = TickCount;
+            return false;
+        }
+
+        return (TickCount - startedAt) >= MaxYieldWaitTicks;
     }
 
     private double EstimateOtherCandidate(Vehicle vehicle)
