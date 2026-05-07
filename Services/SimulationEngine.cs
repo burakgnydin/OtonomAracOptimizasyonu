@@ -5,10 +5,10 @@ namespace OtonomAracOptimizasyonu.Services;
 public sealed class SimulationEngine
 {
     private const double DepotReachToleranceMeters = 0.001d;
-    private const double MinimumDistanceMeters = 20d;
     private const int DepotLoadingTicks = 3;
     private const int HomeUnloadingTicks = 2;
-    private const double ConflictDetectionRangeMeters = 20d;
+    private readonly double _minimumDistanceMeters;
+    private readonly double _conflictDetectionRangeMeters;
     private readonly Dictionary<string, int> _homePositionByVehicleId;
     private readonly Dictionary<string, int> _missionDepotByVehicleId;
     private readonly Dictionary<string, double> _cruiseSpeedByVehicleId;
@@ -24,15 +24,29 @@ public sealed class SimulationEngine
         Road road,
         IEnumerable<Vehicle> vehicles,
         TrafficController trafficController,
-        bool enableReturnTrip = true)
+        bool enableReturnTrip = true,
+        double minimumSafeDistanceMeters = 20d,
+        double conflictDetectionRangeMeters = 20d)
     {
         ArgumentNullException.ThrowIfNull(road);
         ArgumentNullException.ThrowIfNull(vehicles);
         ArgumentNullException.ThrowIfNull(trafficController);
 
+        if (minimumSafeDistanceMeters <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumSafeDistanceMeters), "Minimum guvenli mesafe sifirdan buyuk olmalidir.");
+        }
+
+        if (conflictDetectionRangeMeters <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(conflictDetectionRangeMeters), "Catisma tespit araligi sifirdan buyuk olmalidir.");
+        }
+
         Road = road;
         TrafficController = trafficController;
         EnableReturnTrip = enableReturnTrip;
+        _minimumDistanceMeters = minimumSafeDistanceMeters;
+        _conflictDetectionRangeMeters = conflictDetectionRangeMeters;
         _vehicles = vehicles.ToList();
 
         _homePositionByVehicleId = _vehicles.ToDictionary(
@@ -215,7 +229,7 @@ public sealed class SimulationEngine
             return;
         }
 
-        vehicle.StartReturningHome(_cruiseSpeedByVehicleId[vehicle.Id]);
+        vehicle.StartReturningHome(_homePositionByVehicleId[vehicle.Id], _cruiseSpeedByVehicleId[vehicle.Id]);
         SimulationLogger.Log($"Arac {vehicle.Id}, yuklu donus gorevi icin {homePosition}m baslangic noktasina yoneldi.");
     }
 
@@ -286,7 +300,7 @@ public sealed class SimulationEngine
             {
                 _rightGarageQueue.Enqueue(vehicle);
                 _enqueuedVehicleIds.Add(vehicle.Id);
-                SimulationLogger.Log($"{vehicle.Id}, 240m kuyruguna eklendi.");
+                SimulationLogger.Log($"{vehicle.Id}, {Road.LengthMeters}m kuyruguna eklendi.");
             }
             else
             {
@@ -331,14 +345,14 @@ public sealed class SimulationEngine
     {
         return _vehicles
             .Where(IsOnMainLane)
-            .All(v => v.PositionMeters >= MinimumDistanceMeters);
+            .All(v => v.PositionMeters >= _minimumDistanceMeters);
     }
 
     private bool IsRightEntrySegmentClear()
     {
         return _vehicles
             .Where(IsOnMainLane)
-            .All(v => v.PositionMeters <= (Road.LengthMeters - MinimumDistanceMeters));
+            .All(v => v.PositionMeters <= (Road.LengthMeters - _minimumDistanceMeters));
     }
 
     private void SpawnVehicleFromGarage(Vehicle vehicle, double entryPosition)
@@ -367,7 +381,7 @@ public sealed class SimulationEngine
         _loadingTicksRemainingByVehicleId.Remove(vehicle.Id);
         vehicle.FinishLoadingAndCarryLoad();
 
-        vehicle.StartReturningHome(_cruiseSpeedByVehicleId[vehicle.Id]);
+        vehicle.StartReturningHome(_homePositionByVehicleId[vehicle.Id], _cruiseSpeedByVehicleId[vehicle.Id]);
         SimulationLogger.Log($"Arac {vehicle.Id}, yuklemeyi tamamlayip {_homePositionByVehicleId[vehicle.Id]}m konumundaki baslangic noktasina donus icin cikti.");
         return "Yukleme tamamlandi, donuse geciliyor";
     }
@@ -394,10 +408,15 @@ public sealed class SimulationEngine
             {
                 var currentGap = Math.Abs(vehicle.PositionMeters - other.PositionMeters);
                 var closing = currentGap > finalGap;
-                if (closing && currentGap <= ConflictDetectionRangeMeters && finalGap < MinimumDistanceMeters)
+                if (closing && currentGap <= _conflictDetectionRangeMeters && finalGap < _minimumDistanceMeters)
                 {
                     if (!HasRightOfWay(vehicle, other))
                     {
+                        if (TryAutoPullOver(vehicle, other.Id))
+                        {
+                            return vehicle.PositionMeters;
+                        }
+
                         vehicle.UpdateSpeed(0d);
                         return vehicle.PositionMeters;
                     }
@@ -409,7 +428,7 @@ public sealed class SimulationEngine
             if (vehicle.Direction == other.Direction && IsFollower(vehicle, other))
             {
                 var directionSign = vehicle.Direction == VehicleDirection.LeftToRight ? 1d : -1d;
-                var maxAllowed = otherCandidate - (directionSign * MinimumDistanceMeters);
+                var maxAllowed = otherCandidate - (directionSign * _minimumDistanceMeters);
                 if (vehicle.Direction == VehicleDirection.LeftToRight)
                 {
                     boundedCandidate = Math.Min(boundedCandidate, maxAllowed);
@@ -423,6 +442,11 @@ public sealed class SimulationEngine
 
         if (Math.Abs(boundedCandidate - vehicle.PositionMeters) < 0.0001d)
         {
+            if (TryAutoPullOver(vehicle, "TRAFFIC"))
+            {
+                return vehicle.PositionMeters;
+            }
+
             vehicle.UpdateSpeed(0d);
             return vehicle.PositionMeters;
         }
@@ -433,6 +457,56 @@ public sealed class SimulationEngine
         }
 
         return Math.Clamp(boundedCandidate, 0d, Road.LengthMeters);
+    }
+
+    private bool TryAutoPullOver(Vehicle vehicle, string yieldToVehicleId)
+    {
+        if (!IsOnMainLane(vehicle))
+        {
+            return false;
+        }
+
+        if (vehicle.CurrentTask == VehicleTask.GoingToPocketForYielding || vehicle.CurrentTask == VehicleTask.WaitingInPocket)
+        {
+            return false;
+        }
+
+        var safeArea = FindNearestAvailableSafeArea(vehicle.Id, vehicle.PositionMeters, vehicle.Direction);
+        if (safeArea is null)
+        {
+            SimulationLogger.Log($"Arac {vehicle.Id} icin cekilme alani bulunamadi; ana yolda durmak zorunda kaldi.");
+            return false;
+        }
+
+        if (!safeArea.TryReserveSlot(vehicle.Id))
+        {
+            return false;
+        }
+
+        var safeAreaType = safeArea is Pocket ? "Cep" : "Depo";
+        SimulationLogger.Log($"Arac {vehicle.Id}, ana yol bekleme yasagi nedeniyle {safeArea.PositionMeters}m {safeAreaType} alanina cekiliyor.");
+        vehicle.StartRetreatManeuver(safeArea.PositionMeters, yieldToVehicleId);
+        return true;
+    }
+
+    private VehicleStorageArea? FindNearestAvailableSafeArea(string vehicleId, double positionMeters, VehicleDirection direction)
+    {
+        IEnumerable<VehicleStorageArea> candidates = Road.Pockets
+            .Cast<VehicleStorageArea>()
+            .Concat(Road.Depots)
+            .Where(area => !area.IsFullyAllocated || area.HasReservation(vehicleId));
+
+        var inDirection = direction == VehicleDirection.LeftToRight
+            ? candidates.Where(area => area.PositionMeters >= positionMeters)
+            : candidates.Where(area => area.PositionMeters <= positionMeters);
+
+        var chosen = inDirection
+            .OrderBy(area => Math.Abs(area.PositionMeters - positionMeters))
+            .FirstOrDefault();
+
+        return chosen ?? candidates
+            .OrderBy(area => Math.Abs(area.PositionMeters - positionMeters))
+            .FirstOrDefault();
     }
 
     private double EstimateOtherCandidate(Vehicle vehicle)
@@ -543,19 +617,11 @@ public sealed class SimulationEngine
         }
 
         _unloadingTicksRemainingByVehicleId.Remove(vehicle.Id);
+        ReleaseSafeAreaReservation(vehicle);
         vehicle.CompleteDeliveryCycle();
-        SimulationLogger.Log($"Arac {vehicle.Id}, {_homePositionByVehicleId[vehicle.Id]}m noktasinda bosaltmayi tamamlayip gorevini bitirdi.");
-
-        if (!EnableReturnTrip || vehicle.SingleMissionOnly)
-        {
-            vehicle.CompleteDeliveryCycle();
-            vehicle.EnterGarage();
-            return "Gorev tamamlandi";
-        }
-
-        vehicle.CompleteDeliveryCycle();
-        EnqueueForGarage(vehicle);
-        return "Gorev tamamlandi, garaja alindi";
+        vehicle.UpdateSpeed(0d);
+        SimulationLogger.Log($"Arac {vehicle.Id}, {_homePositionByVehicleId[vehicle.Id]}m noktasinda bosaltmayi tamamlayip gorevini bitirdi (tek gorev).");
+        return "Gorev tamamlandi (baslangica dondu)";
     }
 
     private void EnqueueForGarage(Vehicle vehicle)
@@ -569,7 +635,7 @@ public sealed class SimulationEngine
         if (Math.Abs(vehicle.HomePositionMeters - Road.LengthMeters) < DepotReachToleranceMeters)
         {
             _rightGarageQueue.Enqueue(vehicle);
-            SimulationLogger.Log($"{vehicle.Id}, gorev sonrasi 240m kuyruguna girdi.");
+            SimulationLogger.Log($"{vehicle.Id}, gorev sonrasi {Road.LengthMeters}m kuyruguna girdi.");
         }
         else
         {

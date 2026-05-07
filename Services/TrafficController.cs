@@ -68,11 +68,18 @@ public sealed class TrafficController
             throw new InvalidOperationException($"Arac {vehicle.Id} icin kisitli durum bulunamadi.");
         }
 
+        var offMainLaneVehicleIds = _trafficState
+            .Where(v => v.CurrentTask == VehicleTask.WaitingInPocket)
+            .Select(v => v.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         return TrafficStrategy.Evaluate(
             vehicle,
             road,
             currentVehicleState,
-            _restrictedStateByVehicleId.Values.ToList(),
+            _restrictedStateByVehicleId.Values
+                .Where(state => state.VehicleId == vehicle.Id || !offMainLaneVehicleIds.Contains(state.VehicleId))
+                .ToList(),
             TickDurationSeconds);
     }
 

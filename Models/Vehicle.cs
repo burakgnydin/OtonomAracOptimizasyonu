@@ -223,4 +223,19 @@ public sealed class Vehicle
         UpdateSpeed(cruiseSpeedKmh);
         CurrentTask = VehicleTask.ReturningHome;
     }
+
+    public void StartReturningHome(int homePositionMeters, double cruiseSpeedKmh)
+    {
+        if (homePositionMeters < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(homePositionMeters), "Baslangic konumu negatif olamaz.");
+        }
+
+        UpdateTargetDepot(homePositionMeters);
+        UpdateDirection(homePositionMeters >= PositionMeters
+            ? VehicleDirection.LeftToRight
+            : VehicleDirection.RightToLeft);
+        UpdateSpeed(cruiseSpeedKmh);
+        CurrentTask = VehicleTask.ReturningHome;
+    }
 }

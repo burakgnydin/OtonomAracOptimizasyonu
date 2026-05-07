@@ -4,10 +4,20 @@ namespace OtonomAracOptimizasyonu.Services;
 
 public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
 {
-    public const double MinimumDistanceMeters = 20d;
+    private readonly double _minimumDistanceMeters;
     private const double ProactiveManeuverWindowMeters = 60d;
     private const double UncertaintyBufferMultiplier = 0.5d;
     private const string AssumedOncomingVehicleId = "ASSUMED_ONCOMING";
+
+    public SafetyFirstTrafficStrategy(double minimumDistanceMeters = 20d)
+    {
+        if (minimumDistanceMeters <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minimumDistanceMeters), "Minimum guvenli mesafe sifirdan buyuk olmalidir.");
+        }
+
+        _minimumDistanceMeters = minimumDistanceMeters;
+    }
 
     public TrafficDecision Evaluate(
         Vehicle vehicle,
@@ -63,7 +73,17 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
 
         if (ViolatesMinimumGapWithSameDirectionVehicles(currentVehicleState, predictedPosition, requiredGap, sameDirectionVehicles))
         {
-            return TrafficDecision.Stop(TrafficStopReason.CollisionRisk, "Carpisma riski (ayni yon)");
+            var pullOver = TryCreateStrictPullOverDecision(
+                vehicle,
+                currentVehicleState,
+                sameDirectionVehicles,
+                road);
+            if (pullOver is not null)
+            {
+                return pullOver;
+            }
+
+            return TrafficDecision.Stop(TrafficStopReason.CollisionRisk, "Carpisma riski (ayni yon) - cekilme alani bulunamadi");
         }
 
         var oppositeDirectionVehicles = trafficState
@@ -89,7 +109,17 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
                 return maneuverDecision;
             }
 
-            return TrafficDecision.Stop(TrafficStopReason.CollisionRisk, "Carpisma riski (zit yon)");
+            var pullOver = TryCreateStrictPullOverDecision(
+                vehicle,
+                currentVehicleState,
+                oppositeDirectionVehicles,
+                road);
+            if (pullOver is not null)
+            {
+                return pullOver;
+            }
+
+            return TrafficDecision.Stop(TrafficStopReason.CollisionRisk, "Carpisma riski (zit yon) - cekilme alani bulunamadi");
         }
 
         if (TriggersDeadlockWait(vehicle, currentVehicleState, oppositeDirectionVehicles, road))
@@ -139,6 +169,56 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             .FirstOrDefault();
     }
 
+    private static VehicleStorageArea? FindNearestAvailableSafeAreaInDirection(
+        string vehicleId,
+        VehicleRestrictedState currentVehicleState,
+        Road road)
+    {
+        IEnumerable<VehicleStorageArea> candidates = road.Pockets
+            .Cast<VehicleStorageArea>()
+            .Concat(road.Depots)
+            .Where(area => !area.IsFullyAllocated || area.HasReservation(vehicleId));
+
+        candidates = currentVehicleState.InferredDirection == VehicleDirection.LeftToRight
+            ? candidates.Where(area => area.PositionMeters >= currentVehicleState.EstimatedPositionMeters)
+            : candidates.Where(area => area.PositionMeters <= currentVehicleState.EstimatedPositionMeters);
+
+        return candidates
+            .OrderBy(area => Math.Abs(area.PositionMeters - currentVehicleState.EstimatedPositionMeters))
+            .FirstOrDefault();
+    }
+
+    private static TrafficDecision? TryCreateStrictPullOverDecision(
+        Vehicle vehicle,
+        VehicleRestrictedState currentVehicleState,
+        IReadOnlyCollection<VehicleRestrictedState> trafficState,
+        Road road)
+    {
+        if (!IsRoadDrivingTask(vehicle.CurrentTask))
+        {
+            return null;
+        }
+
+        var nearestInDirection = FindNearestAvailableSafeAreaInDirection(vehicle.Id, currentVehicleState, road);
+        var safeArea = nearestInDirection ?? FindNearestAvailableSafeArea(vehicle.Id, currentVehicleState, road);
+        if (safeArea is null)
+        {
+            return null;
+        }
+
+        var closestVehicleId = trafficState
+            .Where(other => other.VehicleId != vehicle.Id)
+            .OrderBy(other => Math.Abs(other.EstimatedPositionMeters - currentVehicleState.EstimatedPositionMeters))
+            .Select(other => other.VehicleId)
+            .FirstOrDefault() ?? "TRAFFIC";
+
+        var safeAreaType = safeArea is Pocket ? "Cep" : "Depo";
+        var directive = new ManeuverDirective(safeArea.PositionMeters, closestVehicleId, safeAreaType);
+        return TrafficDecision.StartManeuver(
+            directive,
+            $"Ana yol bekleme yasagi: {safeArea.PositionMeters}m {safeAreaType} alanina cekil");
+    }
+
     private static bool ShouldCurrentVehicleYield(
         Vehicle currentVehicle,
         VehicleRestrictedState currentState,
@@ -175,7 +255,7 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             : Math.Abs(safeArea.PositionMeters - state.EstimatedPositionMeters);
     }
 
-    private static bool CanExitSafeArea(Vehicle vehicle, IReadOnlyCollection<VehicleRestrictedState> trafficState)
+    private bool CanExitSafeArea(Vehicle vehicle, IReadOnlyCollection<VehicleRestrictedState> trafficState)
     {
         if (string.IsNullOrWhiteSpace(vehicle.YieldToVehicleId))
         {
@@ -193,7 +273,7 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             return true;
         }
 
-        return Math.Abs(yieldToVehicle.EstimatedPositionMeters - vehicle.ManeuverSafeAreaPositionMeters.Value) > (MinimumDistanceMeters * 2d);
+        return Math.Abs(yieldToVehicle.EstimatedPositionMeters - vehicle.ManeuverSafeAreaPositionMeters.Value) > (_minimumDistanceMeters * 2d);
     }
 
     private static TrafficDecision? TryCreateProactiveManeuverDecision(
@@ -373,8 +453,8 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
         return Math.Clamp(candidate, 0, road.LengthMeters);
     }
 
-    private static double DynamicMinimumGap(double uncertaintyMeters)
+    private double DynamicMinimumGap(double uncertaintyMeters)
     {
-        return MinimumDistanceMeters + (uncertaintyMeters * UncertaintyBufferMultiplier);
+        return _minimumDistanceMeters + (uncertaintyMeters * UncertaintyBufferMultiplier);
     }
 }
