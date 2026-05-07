@@ -16,6 +16,7 @@ public sealed class SimulationEngine
     private readonly Dictionary<string, int> _loadingTicksRemainingByVehicleId = new();
     private readonly Dictionary<string, int> _unloadingTicksRemainingByVehicleId = new();
     private readonly Dictionary<string, int> _yieldWaitStartedTickByVehicleId = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> _conflictPairLocks = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<Vehicle> _vehicles;
     private bool _startupLogged;
 
@@ -68,6 +69,7 @@ public sealed class SimulationEngine
 
         DispatchVehiclesFromGarageWithStagger();
         RefreshStorageOccupancy();
+        _conflictPairLocks.Clear();
         ResolveProactiveOncomingConflicts();
         ResolveImmediateMainLaneConflicts();
         var vehicleStates = new List<VehicleTickState>(_vehicles.Count);
@@ -132,6 +134,15 @@ public sealed class SimulationEngine
 
                 HandleVehicleAtTarget(vehicle);
                 vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.None, "Hedefe ulasti"));
+                continue;
+            }
+
+            // CRITICAL: ReversingToPocket araci cebe kadar KESINTISIZ hareket etmeli (sensor stop yok).
+            if (vehicle.CurrentTask == VehicleTask.ReversingToPocket)
+            {
+                var reverseNext = CalculateNextPosition(vehicle);
+                vehicle.UpdatePosition(reverseNext);
+                vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.None, "Geri vites ile cebe/depoya gidiyor"));
                 continue;
             }
 
@@ -229,6 +240,18 @@ public sealed class SimulationEngine
 
     private void ResolveConflict(Vehicle a, Vehicle b)
     {
+        if (IsConflictLocked(a) || IsConflictLocked(b))
+        {
+            return;
+        }
+
+        // One-shot lock per pair per tick (prevents A/B swapped double decision)
+        var pairKey = CreatePairKey(a.Id, b.Id);
+        if (!_conflictPairLocks.Add(pairKey))
+        {
+            return;
+        }
+
         var yielder = DetermineYielder(a, b);
         if (yielder is null)
         {
@@ -262,6 +285,21 @@ public sealed class SimulationEngine
         }
 
         TriggerChainYieldForFollowers(yielder, passer.Id);
+    }
+
+    private static bool IsConflictLocked(Vehicle vehicle)
+    {
+        return vehicle.CurrentTask is VehicleTask.WaitingForClearance
+            or VehicleTask.ReversingToPocket
+            or VehicleTask.WaitingInPocket
+            or VehicleTask.WaitingInDepot
+            or VehicleTask.LoadingAtDepot
+            or VehicleTask.UnloadingAtHome;
+    }
+
+    private static string CreatePairKey(string aId, string bId)
+    {
+        return string.CompareOrdinal(aId, bId) <= 0 ? $"{aId}|{bId}" : $"{bId}|{aId}";
     }
 
     private bool IsZeroEntrySegmentClear()
@@ -377,8 +415,10 @@ public sealed class SimulationEngine
             return false;
         }
 
-        var safeArea = FindNearestAvailableSafeAreaPreferPocket(vehicle.Id, vehicle.PositionMeters);
-        if (safeArea is null || !safeArea.TryReserveSlot(vehicle.Id))
+        // CRITICAL: En yakin alan doluysa/rezerveliyse bir sonrakini dene (yeni eklenen ceplerin kullanilmasi icin).
+        var safeArea = GetSafeAreaCandidatesPreferPocket(vehicle.Id, vehicle.PositionMeters)
+            .FirstOrDefault(area => area.TryReserveSlot(vehicle.Id));
+        if (safeArea is null)
         {
             return false;
         }
@@ -392,24 +432,20 @@ public sealed class SimulationEngine
         return true;
     }
 
-    private VehicleStorageArea? FindNearestAvailableSafeAreaPreferPocket(string vehicleId, double positionMeters)
+    private IEnumerable<VehicleStorageArea> GetSafeAreaCandidatesPreferPocket(string vehicleId, double positionMeters)
     {
         // Cep oncelikli: Depo sadece cep bulunamazsa secilsin.
         var pockets = Road.Pockets
             .Cast<VehicleStorageArea>()
             .Where(area => !area.IsFullyAllocated || area.HasReservation(vehicleId))
-            .OrderBy(area => Math.Abs(area.PositionMeters - positionMeters))
-            .FirstOrDefault();
-        if (pockets is not null)
-        {
-            return pockets;
-        }
+            .OrderBy(area => Math.Abs(area.PositionMeters - positionMeters));
 
-        return Road.Depots
+        var depots = Road.Depots
             .Cast<VehicleStorageArea>()
             .Where(area => !area.IsFullyAllocated || area.HasReservation(vehicleId))
-            .OrderBy(area => Math.Abs(area.PositionMeters - positionMeters))
-            .FirstOrDefault();
+            .OrderBy(area => Math.Abs(area.PositionMeters - positionMeters));
+
+        return pockets.Concat(depots);
     }
     private void TriggerChainYieldForFollowers(Vehicle retreatingFrontVehicle, string yieldToVehicleId)
     {
@@ -614,38 +650,40 @@ public sealed class SimulationEngine
 
     private Vehicle? DetermineYielder(Vehicle a, Vehicle b)
     {
-        // Absolute Right-of-Way:
-        // 1) ReturningHome her zaman gecer (yielder digeridir)
-        if (a.CurrentTask == VehicleTask.ReturningHome || b.CurrentTask == VehicleTask.ReturningHome)
+        // Asymmetric hierarchy (yielder = lower priority):
+        // 1) ReturningHome (highest)
+        // 2) GoingToDepot + HasLoad=true
+        // 3) GoingToDepot + HasLoad=false
+        var aRank = GetPriorityRank(a);
+        var bRank = GetPriorityRank(b);
+        if (aRank != bRank)
         {
-            if (a.CurrentTask == VehicleTask.ReturningHome && b.CurrentTask != VehicleTask.ReturningHome) return b;
-            if (b.CurrentTask == VehicleTask.ReturningHome && a.CurrentTask != VehicleTask.ReturningHome) return a;
+            return aRank > bRank ? a : b;
         }
 
-        // 2) Yuklu, yuksuze gore ustundur
-        if (a.HasLoad != b.HasLoad)
+        // Tie-breaker: ID'si KUCUK olan yielder olsun (kural).
+        return string.CompareOrdinal(a.Id, b.Id) < 0 ? a : b;
+    }
+
+    private static int GetPriorityRank(Vehicle v)
+    {
+        if (v.CurrentTask == VehicleTask.ReturningHome)
         {
-            return a.HasLoad ? b : a;
+            return 0;
         }
 
-        var aDistance = Math.Abs(a.TargetDepotPositionMeters - a.PositionMeters);
-        var bDistance = Math.Abs(b.TargetDepotPositionMeters - b.PositionMeters);
-        if (Math.Abs(aDistance - bDistance) > 0.001d)
+        if (v.CurrentTask == VehicleTask.GoingToDepot && v.HasLoad)
         {
-            return aDistance > bDistance ? a : b;
+            return 1;
         }
 
-        // 3) Tam beraberlik: kendi en yakin cep/deposuna daha yakin olan yielder olsun.
-        var aSafe = FindNearestAvailableSafeArea(a.Id, a.PositionMeters);
-        var bSafe = FindNearestAvailableSafeArea(b.Id, b.PositionMeters);
-        var aSafeDistance = aSafe is null ? double.MaxValue : Math.Abs(aSafe.PositionMeters - a.PositionMeters);
-        var bSafeDistance = bSafe is null ? double.MaxValue : Math.Abs(bSafe.PositionMeters - b.PositionMeters);
-        if (Math.Abs(aSafeDistance - bSafeDistance) > 0.001d)
+        if (v.CurrentTask == VehicleTask.GoingToDepot && !v.HasLoad)
         {
-            return aSafeDistance < bSafeDistance ? a : b;
+            return 2;
         }
 
-        return string.CompareOrdinal(a.Id, b.Id) > 0 ? a : b;
+        // default: lowest priority (yields)
+        return 3;
     }
 
     private static bool IsFacingEachOther(Vehicle a, Vehicle b)
