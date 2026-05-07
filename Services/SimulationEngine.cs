@@ -66,6 +66,8 @@ public sealed class SimulationEngine
 
         DispatchVehiclesFromGarageWithStagger();
         RefreshStorageOccupancy();
+        ResolveProactiveOncomingConflicts();
+        ResolveImmediateMainLaneConflicts();
         var vehicleStates = new List<VehicleTickState>(_vehicles.Count);
 
         foreach (var vehicle in _vehicles)
@@ -94,7 +96,14 @@ public sealed class SimulationEngine
                 continue;
             }
 
-            if (vehicle.CurrentTask == VehicleTask.WaitingInPocket)
+            if (vehicle.CurrentTask == VehicleTask.WaitingForClearance)
+            {
+                vehicle.UpdateSpeed(0d);
+                vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.DeadlockAvoidance, "Yol acilmasini bekliyor"));
+                continue;
+            }
+
+            if (vehicle.CurrentTask is VehicleTask.WaitingInPocket or VehicleTask.WaitingInDepot)
             {
                 if (!HasClearanceToResume(vehicle))
                 {
@@ -112,26 +121,13 @@ public sealed class SimulationEngine
                 if (vehicle.CurrentTask == VehicleTask.ReversingToPocket)
                 {
                     vehicle.MarkWaitingInSafeArea();
+                    NotifyPasserIfWaiting(vehicle);
                     vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.DeadlockAvoidance, "Cepte/depoda yol veriyor"));
                     continue;
                 }
 
                 HandleVehicleAtTarget(vehicle);
                 vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.None, "Hedefe ulasti"));
-                continue;
-            }
-
-            if (ShouldYieldForOncoming(vehicle, out var oncomingVehicleId))
-            {
-                if (!TryAutoPullOver(vehicle, oncomingVehicleId))
-                {
-                    vehicle.UpdateSpeed(0d);
-                    vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.CollisionRisk, "Yol verecek alan bulunamadi, bekliyor"));
-                    continue;
-                }
-
-                TriggerChainYieldForFollowers(vehicle, oncomingVehicleId);
-                vehicleStates.Add(CreateTickState(vehicle, TrafficStopReason.DeadlockAvoidance, $"Yol veriyor: {oncomingVehicleId}"));
                 continue;
             }
 
@@ -172,6 +168,96 @@ public sealed class SimulationEngine
             vehicle.DispatchToDepot(_cruiseSpeedByVehicleId[vehicle.Id]);
             SimulationLogger.Log($"{vehicle.Id} yola cikti (0m), hedef D{vehicle.TargetDepotPositionMeters}");
         }
+    }
+
+    private void ResolveImmediateMainLaneConflicts()
+    {
+        var mainLaneVehicles = _vehicles.Where(IsOnMainLane).ToList();
+        for (var i = 0; i < mainLaneVehicles.Count; i++)
+        {
+            for (var j = i + 1; j < mainLaneVehicles.Count; j++)
+            {
+                var a = mainLaneVehicles[i];
+                var b = mainLaneVehicles[j];
+                if (a.Direction == b.Direction || !IsFacingEachOther(a, b))
+                {
+                    continue;
+                }
+
+                var gap = Math.Abs(a.PositionMeters - b.PositionMeters);
+                if (gap > _minimumDistanceMeters)
+                {
+                    continue;
+                }
+
+                // Hard physical wall: birbirinin icinden gecis yasak.
+                if (a.CurrentTask != VehicleTask.ReversingToPocket) a.UpdateSpeed(0d);
+                if (b.CurrentTask != VehicleTask.ReversingToPocket) b.UpdateSpeed(0d);
+                ResolveConflict(a, b);
+            }
+        }
+    }
+
+    private void ResolveProactiveOncomingConflicts()
+    {
+        var mainLaneVehicles = _vehicles.Where(IsOnMainLane).ToList();
+        for (var i = 0; i < mainLaneVehicles.Count; i++)
+        {
+            for (var j = i + 1; j < mainLaneVehicles.Count; j++)
+            {
+                var a = mainLaneVehicles[i];
+                var b = mainLaneVehicles[j];
+                if (a.Direction == b.Direction || !IsFacingEachOther(a, b))
+                {
+                    continue;
+                }
+
+                var gap = Math.Abs(a.PositionMeters - b.PositionMeters);
+                if (gap > OppositeConflictRangeMeters || gap <= _minimumDistanceMeters)
+                {
+                    continue;
+                }
+
+                ResolveConflict(a, b);
+            }
+        }
+    }
+
+    private void ResolveConflict(Vehicle a, Vehicle b)
+    {
+        var yielder = DetermineYielder(a, b);
+        if (yielder is null)
+        {
+            return;
+        }
+
+        var passer = yielder.Id == a.Id ? b : a;
+        if (yielder.CurrentTask is VehicleTask.WaitingInPocket or VehicleTask.WaitingInDepot)
+        {
+            return;
+        }
+
+        // Yielder zaten geri cekiliyorsa tekrar karar verme.
+        if (yielder.CurrentTask == VehicleTask.ReversingToPocket)
+        {
+            return;
+        }
+
+        // One-shot decision lock: karar verildiyse passer bekler, tekrar resolve tetiklenmez.
+        if (passer.CurrentTask != VehicleTask.WaitingForClearance)
+        {
+            passer.StartWaitingForClearance(yielder.Id);
+        }
+
+        if (!TryAutoPullOver(yielder, passer.Id))
+        {
+            // Alan yoksa hard-stop: fiziksel duvar gibi beklesinler.
+            yielder.UpdateSpeed(0d);
+            passer.UpdateSpeed(0d);
+            return;
+        }
+
+        TriggerChainYieldForFollowers(yielder, passer.Id);
     }
 
     private bool IsZeroEntrySegmentClear()
@@ -225,8 +311,31 @@ public sealed class SimulationEngine
             return boundedCandidate;
         }
 
+        // Hard stop ISTISNA: geri cekilmek icin hareket eden arac fren yapmaz.
+        if (vehicle.CurrentTask == VehicleTask.ReversingToPocket)
+        {
+            return boundedCandidate;
+        }
+
         foreach (var other in _vehicles.Where(v => v.Id != vehicle.Id && IsOnMainLane(v)))
         {
+            // CRITICAL FIX: ReversingToPocket araci, yol verdigi Passer aracini engel olarak gormemeli.
+            if (vehicle.CurrentTask == VehicleTask.ReversingToPocket &&
+                !string.IsNullOrWhiteSpace(vehicle.YieldToVehicleId) &&
+                string.Equals(other.Id, vehicle.YieldToVehicleId, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            // CRITICAL FIX (reverse direction bug): Passer araci da, kendisine yol veren ReversingToPocket araci engel olarak gormemeli.
+            // Aksi halde car-following / hard-gap kurali Passer'i dondurup deadlock olusturuyor.
+            if (other.CurrentTask == VehicleTask.ReversingToPocket &&
+                !string.IsNullOrWhiteSpace(other.YieldToVehicleId) &&
+                string.Equals(other.YieldToVehicleId, vehicle.Id, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
             var otherCandidate = EstimateOtherCandidate(other);
             var finalGap = Math.Abs(boundedCandidate - otherCandidate);
 
@@ -264,16 +373,40 @@ public sealed class SimulationEngine
             return false;
         }
 
-        var safeArea = FindNearestAvailableSafeArea(vehicle.Id, vehicle.PositionMeters);
+        var safeArea = FindNearestAvailableSafeAreaPreferPocket(vehicle.Id, vehicle.PositionMeters);
         if (safeArea is null || !safeArea.TryReserveSlot(vehicle.Id))
         {
             return false;
         }
 
-        vehicle.StartRetreatManeuver(safeArea.PositionMeters, yieldToVehicleId);
+        vehicle.StartRetreatManeuver(safeArea.PositionMeters, yieldToVehicleId, safeArea is Depot);
+        if (_cruiseSpeedByVehicleId.TryGetValue(vehicle.Id, out var cruiseSpeed) && cruiseSpeed > 0)
+        {
+            // Reversing state'inde arac fiziksel olarak hedefe dogru hareket etmeli.
+            vehicle.UpdateSpeed(cruiseSpeed);
+        }
         return true;
     }
 
+    private VehicleStorageArea? FindNearestAvailableSafeAreaPreferPocket(string vehicleId, double positionMeters)
+    {
+        // Cep oncelikli: Depo sadece cep bulunamazsa secilsin.
+        var pockets = Road.Pockets
+            .Cast<VehicleStorageArea>()
+            .Where(area => !area.IsFullyAllocated || area.HasReservation(vehicleId))
+            .OrderBy(area => Math.Abs(area.PositionMeters - positionMeters))
+            .FirstOrDefault();
+        if (pockets is not null)
+        {
+            return pockets;
+        }
+
+        return Road.Depots
+            .Cast<VehicleStorageArea>()
+            .Where(area => !area.IsFullyAllocated || area.HasReservation(vehicleId))
+            .OrderBy(area => Math.Abs(area.PositionMeters - positionMeters))
+            .FirstOrDefault();
+    }
     private void TriggerChainYieldForFollowers(Vehicle retreatingFrontVehicle, string yieldToVehicleId)
     {
         var followers = _vehicles
@@ -354,7 +487,28 @@ public sealed class SimulationEngine
     {
         return vehicle.CurrentTask == VehicleTask.GoingToDepot ||
                vehicle.CurrentTask == VehicleTask.ReturningHome ||
-               vehicle.CurrentTask == VehicleTask.ReversingToPocket;
+               vehicle.CurrentTask == VehicleTask.ReversingToPocket ||
+               vehicle.CurrentTask == VehicleTask.WaitingForClearance;
+    }
+
+    private void NotifyPasserIfWaiting(Vehicle yielder)
+    {
+        if (string.IsNullOrWhiteSpace(yielder.YieldToVehicleId))
+        {
+            return;
+        }
+
+        var passer = _vehicles.FirstOrDefault(v => string.Equals(v.Id, yielder.YieldToVehicleId, StringComparison.Ordinal));
+        if (passer is null)
+        {
+            return;
+        }
+
+        if (passer.CurrentTask == VehicleTask.WaitingForClearance)
+        {
+            passer.ResumeAfterClearance(_cruiseSpeedByVehicleId[passer.Id]);
+            SimulationLogger.Log($"Arac {passer.Id}, {yielder.Id} cebe girdigi icin beklemeyi bitirip devam ediyor.");
+        }
     }
 
     private bool ShouldStopForLeadingVehicle(Vehicle vehicle)
@@ -364,6 +518,7 @@ public sealed class SimulationEngine
             return false;
         }
 
+        // Directional sensor: sadece gidilen yonde "ondeki" araci dikkate al.
         var leading = _vehicles
             .Where(other =>
                 other.Id != vehicle.Id &&
@@ -380,6 +535,22 @@ public sealed class SimulationEngine
 
         var gap = Math.Abs(leading.PositionMeters - vehicle.PositionMeters);
         if (gap > SensorRangeMeters)
+        {
+            return false;
+        }
+
+        // CRITICAL FIX: ReversingToPocket yapan yielder, Passer (YieldToVehicleId) aracini "durmus on arac" gibi gormemeli.
+        if (vehicle.CurrentTask == VehicleTask.ReversingToPocket &&
+            !string.IsNullOrWhiteSpace(vehicle.YieldToVehicleId) &&
+            string.Equals(leading.Id, vehicle.YieldToVehicleId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        // CRITICAL FIX: Passer araci da, kendisine yol veren ReversingToPocket araci onunde engel saymamalidir (ghosting).
+        if (leading.CurrentTask == VehicleTask.ReversingToPocket &&
+            !string.IsNullOrWhiteSpace(leading.YieldToVehicleId) &&
+            string.Equals(leading.YieldToVehicleId, vehicle.Id, StringComparison.Ordinal))
         {
             return false;
         }
@@ -422,6 +593,15 @@ public sealed class SimulationEngine
 
     private Vehicle? DetermineYielder(Vehicle a, Vehicle b)
     {
+        // Absolute Right-of-Way:
+        // 1) ReturningHome her zaman gecer (yielder digeridir)
+        if (a.CurrentTask == VehicleTask.ReturningHome || b.CurrentTask == VehicleTask.ReturningHome)
+        {
+            if (a.CurrentTask == VehicleTask.ReturningHome && b.CurrentTask != VehicleTask.ReturningHome) return b;
+            if (b.CurrentTask == VehicleTask.ReturningHome && a.CurrentTask != VehicleTask.ReturningHome) return a;
+        }
+
+        // 2) Yuklu, yuksuze gore ustundur
         if (a.HasLoad != b.HasLoad)
         {
             return a.HasLoad ? b : a;
@@ -434,6 +614,7 @@ public sealed class SimulationEngine
             return aDistance > bDistance ? a : b;
         }
 
+        // 3) Tam beraberlik: kendi en yakin cep/deposuna daha yakin olan yielder olsun.
         var aSafe = FindNearestAvailableSafeArea(a.Id, a.PositionMeters);
         var bSafe = FindNearestAvailableSafeArea(b.Id, b.PositionMeters);
         var aSafeDistance = aSafe is null ? double.MaxValue : Math.Abs(aSafe.PositionMeters - a.PositionMeters);
@@ -521,7 +702,10 @@ public sealed class SimulationEngine
             return false;
         }
 
-        vehicle.StartRetreatManeuver(directive.SafeAreaPositionMeters, directive.YieldToVehicleId);
+        vehicle.StartRetreatManeuver(
+            directive.SafeAreaPositionMeters,
+            directive.YieldToVehicleId,
+            safeAreaIsDepot: area is Depot);
         return true;
     }
 

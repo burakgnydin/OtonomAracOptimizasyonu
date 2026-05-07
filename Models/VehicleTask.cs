@@ -11,6 +11,7 @@ public enum VehicleTask
     ReversingToPocket = 6,
     WaitingInPocket = 7,
     WaitingInDepot = 8,
+    WaitingForClearance = 9,
     NormalDrive = GoingToDepot,
     RetreatingToSafeArea = ReversingToPocket,
     WaitingInSafeArea = WaitingInPocket

@@ -6,6 +6,8 @@ public sealed class Vehicle
     private readonly HashSet<int> _visitedDepotPositions = [];
     private readonly Queue<int> _targetDepots;
     private int? _resumeTargetAfterYield;
+    private VehicleTask? _resumeTaskAfterClearance;
+    private bool _yieldSafeAreaIsDepot;
 
     public Vehicle(
         string id,
@@ -142,7 +144,7 @@ public sealed class Vehicle
 
     public bool IsSpawnDelayElapsed => SpawnDelayRemainingSeconds <= 0d;
 
-    public void StartRetreatManeuver(int safeAreaPositionMeters, string yieldToVehicleId)
+    public void StartRetreatManeuver(int safeAreaPositionMeters, string yieldToVehicleId, bool safeAreaIsDepot)
     {
         if (safeAreaPositionMeters < 0)
         {
@@ -158,6 +160,7 @@ public sealed class Vehicle
         CurrentTask = VehicleTask.ReversingToPocket;
         ManeuverSafeAreaPositionMeters = safeAreaPositionMeters;
         YieldToVehicleId = yieldToVehicleId;
+        _yieldSafeAreaIsDepot = safeAreaIsDepot;
         TargetDepotPositionMeters = safeAreaPositionMeters;
         Direction = safeAreaPositionMeters >= PositionMeters
             ? VehicleDirection.LeftToRight
@@ -168,8 +171,36 @@ public sealed class Vehicle
     {
         if (CurrentTask == VehicleTask.ReversingToPocket || CurrentTask == VehicleTask.WaitingInPocket)
         {
-            CurrentTask = VehicleTask.WaitingInPocket;
+            CurrentTask = _yieldSafeAreaIsDepot ? VehicleTask.WaitingInDepot : VehicleTask.WaitingInPocket;
         }
+    }
+
+    public void StartWaitingForClearance(string waitingForVehicleId)
+    {
+        if (string.IsNullOrWhiteSpace(waitingForVehicleId))
+        {
+            throw new ArgumentException("Beklenen arac kimligi bos olamaz.", nameof(waitingForVehicleId));
+        }
+
+        if (CurrentTask is VehicleTask.GoingToDepot or VehicleTask.ReturningHome)
+        {
+            _resumeTaskAfterClearance = CurrentTask;
+        }
+
+        CurrentTask = VehicleTask.WaitingForClearance;
+        YieldToVehicleId = waitingForVehicleId;
+        UpdateSpeed(0d);
+    }
+
+    public void ResumeAfterClearance(double cruiseSpeedKmh)
+    {
+        CurrentTask = _resumeTaskAfterClearance ?? (HasLoad ? VehicleTask.ReturningHome : VehicleTask.GoingToDepot);
+        _resumeTaskAfterClearance = null;
+        YieldToVehicleId = null;
+        UpdateSpeed(cruiseSpeedKmh);
+        Direction = TargetDepotPositionMeters >= PositionMeters
+            ? VehicleDirection.LeftToRight
+            : VehicleDirection.RightToLeft;
     }
 
     public void ResumeOriginalMission(double cruiseSpeedKmh)
@@ -181,6 +212,7 @@ public sealed class Vehicle
         ManeuverSafeAreaPositionMeters = null;
         YieldToVehicleId = null;
         _resumeTargetAfterYield = null;
+        _yieldSafeAreaIsDepot = false;
         Direction = TargetDepotPositionMeters >= PositionMeters
             ? VehicleDirection.LeftToRight
             : VehicleDirection.RightToLeft;
