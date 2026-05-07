@@ -60,13 +60,12 @@ public sealed class ScenarioLoader
 
         var vehicles = config.Vehicles
             .Select(vehicle => new Vehicle(
-                vehicle.Id,
-                vehicle.Direction,
-                vehicle.PositionMeters,
-                vehicle.SpeedKmh,
-                vehicle.TargetDepotPositionMeters,
-                vehicle.IsPriority,
-                vehicle.SingleMissionOnly))
+                id: vehicle.Id,
+                speedKmh: vehicle.SpeedKmh,
+                targetDepots: vehicle.TargetDepots.Count > 0 ? vehicle.TargetDepots : [vehicle.TargetDepotPositionMeters],
+                spawnDelaySeconds: vehicle.SpawnDelaySeconds,
+                isPriority: vehicle.IsPriority,
+                singleMissionOnly: vehicle.SingleMissionOnly))
             .ToList();
 
         ValidateInitialStorageCapacity(vehicles, road);
@@ -148,22 +147,17 @@ public sealed class ScenarioLoader
                 throw new ScenarioLoadException("Arac ID alani bos olamaz.");
             }
 
-            if (vehicle.PositionMeters < 0 || vehicle.PositionMeters > road.LengthMeters)
-            {
-                throw new ScenarioLoadException(
-                    $"Arac {vehicle.Id} icin gecersiz baslangic konumu: {vehicle.PositionMeters}m (Yol: 0-{road.LengthMeters}).");
-            }
-
             if (vehicle.SpeedKmh < 0 || vehicle.SpeedKmh > Vehicle.MaxSpeedKmh)
             {
                 throw new ScenarioLoadException(
                     $"Arac {vehicle.Id} icin gecersiz hiz: {vehicle.SpeedKmh} km/h (Maks: {Vehicle.MaxSpeedKmh}).");
             }
 
-            if (!depotSet.Contains(vehicle.TargetDepotPositionMeters))
+            var targets = vehicle.TargetDepots.Count > 0 ? vehicle.TargetDepots : [vehicle.TargetDepotPositionMeters];
+            if (targets.Any(target => !depotSet.Contains(target)))
             {
                 throw new ScenarioLoadException(
-                    $"Arac {vehicle.Id} icin hedef depo gecersiz: {vehicle.TargetDepotPositionMeters}m.");
+                    $"Arac {vehicle.Id} icin hedef depo gecersiz.");
             }
         }
     }
@@ -260,5 +254,10 @@ public sealed record VehicleJsonConfig(
     double PositionMeters,
     double SpeedKmh,
     int TargetDepotPositionMeters,
+    IReadOnlyCollection<int>? TargetDepots = null,
+    double SpawnDelaySeconds = 0d,
     bool IsPriority = false,
-    bool SingleMissionOnly = false);
+    bool SingleMissionOnly = false)
+{
+    public IReadOnlyCollection<int> TargetDepots { get; init; } = TargetDepots ?? [];
+}

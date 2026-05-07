@@ -4,13 +4,14 @@ public sealed class Vehicle
 {
     public const double MaxSpeedKmh = 20d;
     private readonly HashSet<int> _visitedDepotPositions = [];
+    private readonly Queue<int> _targetDepots;
+    private int? _resumeTargetAfterYield;
 
     public Vehicle(
         string id,
-        VehicleDirection direction,
-        double positionMeters,
         double speedKmh,
-        int targetDepotPositionMeters,
+        IEnumerable<int> targetDepots,
+        double spawnDelaySeconds = 0d,
         bool isPriority = false,
         bool singleMissionOnly = false)
     {
@@ -19,31 +20,41 @@ public sealed class Vehicle
             throw new ArgumentException("Arac kimligi bos olamaz.", nameof(id));
         }
 
-        if (positionMeters < 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(positionMeters), "Arac konumu negatif olamaz.");
-        }
-
         if (speedKmh < 0 || speedKmh > MaxSpeedKmh)
         {
             throw new ArgumentOutOfRangeException(nameof(speedKmh), $"Arac hizi [0, {MaxSpeedKmh}] km/h araliginda olmalidir.");
         }
 
-        if (targetDepotPositionMeters < 0)
+        ArgumentNullException.ThrowIfNull(targetDepots);
+        var depots = targetDepots.ToList();
+        if (depots.Count == 0)
         {
-            throw new ArgumentOutOfRangeException(nameof(targetDepotPositionMeters), "Hedef depo konumu negatif olamaz.");
+            throw new ArgumentException("En az bir hedef depo atanmalidir.", nameof(targetDepots));
         }
 
+        if (depots.Any(position => position < 0))
+        {
+            throw new ArgumentOutOfRangeException(nameof(targetDepots), "Hedef depo konumu negatif olamaz.");
+        }
+
+        if (spawnDelaySeconds < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(spawnDelaySeconds), "Spawn gecikmesi negatif olamaz.");
+        }
+
+        _targetDepots = new Queue<int>(depots);
         Id = id;
-        Direction = direction;
-        PositionMeters = positionMeters;
-        HomePositionMeters = positionMeters;
+        Direction = VehicleDirection.LeftToRight;
+        PositionMeters = 0d;
+        HomePositionMeters = 0d;
         SpeedKmh = speedKmh;
-        TargetDepotPositionMeters = targetDepotPositionMeters;
-        OriginalTargetDepotPositionMeters = targetDepotPositionMeters;
+        SpawnDelaySeconds = spawnDelaySeconds;
+        SpawnDelayRemainingSeconds = spawnDelaySeconds;
+        TargetDepotPositionMeters = _targetDepots.Peek();
+        OriginalTargetDepotPositionMeters = TargetDepotPositionMeters;
         IsPriority = isPriority;
         SingleMissionOnly = singleMissionOnly;
-        CurrentTask = VehicleTask.GoingToDepot;
+        CurrentTask = VehicleTask.InGarage;
     }
 
     public string Id { get; }
@@ -55,6 +66,14 @@ public sealed class Vehicle
     public double HomePositionMeters { get; }
 
     public double SpeedKmh { get; private set; }
+
+    public double SpawnDelaySeconds { get; }
+
+    public double SpawnDelayRemainingSeconds { get; private set; }
+
+    public IReadOnlyCollection<int> TargetDepots => _targetDepots.ToArray();
+
+    public int RemainingTargetCount => _targetDepots.Count;
 
     public int TargetDepotPositionMeters { get; private set; }
 
@@ -111,6 +130,18 @@ public sealed class Vehicle
         TargetDepotPositionMeters = targetDepotPositionMeters;
     }
 
+    public void DecreaseSpawnDelay(double seconds)
+    {
+        if (seconds < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(seconds));
+        }
+
+        SpawnDelayRemainingSeconds = Math.Max(0d, SpawnDelayRemainingSeconds - seconds);
+    }
+
+    public bool IsSpawnDelayElapsed => SpawnDelayRemainingSeconds <= 0d;
+
     public void StartRetreatManeuver(int safeAreaPositionMeters, string yieldToVehicleId)
     {
         if (safeAreaPositionMeters < 0)
@@ -123,12 +154,8 @@ public sealed class Vehicle
             throw new ArgumentException("Yol verilecek arac kimligi bos olamaz.", nameof(yieldToVehicleId));
         }
 
-        if (CurrentTask == VehicleTask.GoingToDepot || CurrentTask == VehicleTask.ReturningHome)
-        {
-            OriginalTargetDepotPositionMeters = TargetDepotPositionMeters;
-        }
-
-        CurrentTask = VehicleTask.GoingToPocketForYielding;
+        _resumeTargetAfterYield = TargetDepotPositionMeters;
+        CurrentTask = VehicleTask.ReversingToPocket;
         ManeuverSafeAreaPositionMeters = safeAreaPositionMeters;
         YieldToVehicleId = yieldToVehicleId;
         TargetDepotPositionMeters = safeAreaPositionMeters;
@@ -139,18 +166,21 @@ public sealed class Vehicle
 
     public void MarkWaitingInSafeArea()
     {
-        if (CurrentTask == VehicleTask.GoingToPocketForYielding || CurrentTask == VehicleTask.WaitingInPocket)
+        if (CurrentTask == VehicleTask.ReversingToPocket || CurrentTask == VehicleTask.WaitingInPocket)
         {
             CurrentTask = VehicleTask.WaitingInPocket;
         }
     }
 
-    public void ResumeOriginalMission()
+    public void ResumeOriginalMission(double cruiseSpeedKmh)
     {
-        CurrentTask = HasLoad ? VehicleTask.ReturningHome : VehicleTask.GoingToDepot;
-        TargetDepotPositionMeters = OriginalTargetDepotPositionMeters;
+        var resumeTarget = _resumeTargetAfterYield ?? (_targetDepots.Count > 0 ? _targetDepots.Peek() : 0);
+        TargetDepotPositionMeters = resumeTarget;
+        CurrentTask = resumeTarget == 0 ? VehicleTask.ReturningHome : VehicleTask.GoingToDepot;
+        UpdateSpeed(cruiseSpeedKmh);
         ManeuverSafeAreaPositionMeters = null;
         YieldToVehicleId = null;
+        _resumeTargetAfterYield = null;
         Direction = TargetDepotPositionMeters >= PositionMeters
             ? VehicleDirection.LeftToRight
             : VehicleDirection.RightToLeft;
@@ -166,7 +196,18 @@ public sealed class Vehicle
     public void FinishLoadingAndCarryLoad()
     {
         HasLoad = true;
-        CurrentTask = VehicleTask.ReturningHome;
+        if (_targetDepots.Count > 0)
+        {
+            _targetDepots.Dequeue();
+        }
+
+        TargetDepotPositionMeters = _targetDepots.Count > 0 ? _targetDepots.Peek() : 0;
+        CurrentTask = _targetDepots.Count > 0
+            ? VehicleTask.GoingToDepot
+            : VehicleTask.ReturningHome;
+        Direction = TargetDepotPositionMeters >= PositionMeters
+            ? VehicleDirection.LeftToRight
+            : VehicleDirection.RightToLeft;
     }
 
     public void CompleteDeliveryCycle()
@@ -190,17 +231,22 @@ public sealed class Vehicle
     {
         CurrentTask = VehicleTask.InGarage;
         UpdateSpeed(0d);
-        UpdatePosition(HomePositionMeters);
+        UpdatePosition(0d);
         ManeuverSafeAreaPositionMeters = null;
         YieldToVehicleId = null;
     }
 
-    public void DispatchToDepot(int depotPositionMeters, double cruiseSpeedKmh)
+    public void DispatchToDepot(double cruiseSpeedKmh)
     {
-        UpdatePosition(HomePositionMeters);
-        UpdateTargetDepot(depotPositionMeters);
-        OriginalTargetDepotPositionMeters = depotPositionMeters;
-        UpdateDirection(depotPositionMeters >= PositionMeters
+        if (_targetDepots.Count == 0)
+        {
+            throw new InvalidOperationException("Araca depo atanmamis.");
+        }
+
+        UpdatePosition(0d);
+        UpdateTargetDepot(_targetDepots.Peek());
+        OriginalTargetDepotPositionMeters = TargetDepotPositionMeters;
+        UpdateDirection(TargetDepotPositionMeters >= PositionMeters
             ? VehicleDirection.LeftToRight
             : VehicleDirection.RightToLeft);
         UpdateSpeed(cruiseSpeedKmh);
@@ -211,13 +257,13 @@ public sealed class Vehicle
     {
         CurrentTask = VehicleTask.UnloadingAtHome;
         UpdateSpeed(0d);
-        UpdatePosition(HomePositionMeters);
+        UpdatePosition(0d);
     }
 
     public void StartReturningHome(double cruiseSpeedKmh)
     {
-        UpdateTargetDepot((int)Math.Round(HomePositionMeters, MidpointRounding.AwayFromZero));
-        UpdateDirection(HomePositionMeters >= PositionMeters
+        UpdateTargetDepot(0);
+        UpdateDirection(0 >= PositionMeters
             ? VehicleDirection.LeftToRight
             : VehicleDirection.RightToLeft);
         UpdateSpeed(cruiseSpeedKmh);

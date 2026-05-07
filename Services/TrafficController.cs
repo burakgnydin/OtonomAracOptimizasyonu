@@ -292,7 +292,7 @@ public sealed class TrafficController
     {
         return vehicle.CurrentTask == VehicleTask.GoingToDepot ||
                vehicle.CurrentTask == VehicleTask.ReturningHome ||
-               vehicle.CurrentTask == VehicleTask.GoingToPocketForYielding ||
+               vehicle.CurrentTask == VehicleTask.ReversingToPocket ||
                vehicle.CurrentTask == VehicleTask.WaitingInPocket;
     }
 }

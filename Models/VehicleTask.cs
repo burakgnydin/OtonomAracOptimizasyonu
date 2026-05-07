@@ -8,9 +8,10 @@ public enum VehicleTask
     ReturningHome = 3,
     UnloadingAtHome = 4,
     Completed = 5,
-    GoingToPocketForYielding = 6,
+    ReversingToPocket = 6,
     WaitingInPocket = 7,
+    WaitingInDepot = 8,
     NormalDrive = GoingToDepot,
-    RetreatingToSafeArea = GoingToPocketForYielding,
+    RetreatingToSafeArea = ReversingToPocket,
     WaitingInSafeArea = WaitingInPocket
 }

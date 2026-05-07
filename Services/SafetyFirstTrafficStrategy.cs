@@ -43,7 +43,7 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
                 : TrafficDecision.Stop(TrafficStopReason.DeadlockAvoidance, "Guvenli alanda bekliyor");
         }
 
-        if (vehicle.CurrentTask == VehicleTask.GoingToPocketForYielding)
+        if (vehicle.CurrentTask == VehicleTask.ReversingToPocket)
         {
             return TrafficDecision.MoveAllowed();
         }
@@ -225,11 +225,6 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
         VehicleRestrictedState oncomingState,
         Road road)
     {
-        if (currentVehicle.IsPriority != oncomingState.IsPriority)
-        {
-            return !currentVehicle.IsPriority;
-        }
-
         if (currentVehicle.HasLoad != oncomingState.HasLoad)
         {
             return !currentVehicle.HasLoad;
