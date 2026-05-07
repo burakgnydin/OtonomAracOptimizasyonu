@@ -39,6 +39,12 @@ public sealed class TrafficController
 
         foreach (var vehicle in _trafficState)
         {
+            if (!IsTrackableOnMainLane(vehicle))
+            {
+                _restrictedStateByVehicleId.Remove(vehicle.Id);
+                continue;
+            }
+
             if (!_trackers.TryGetValue(vehicle.Id, out var tracker))
             {
                 tracker = new VehicleObservationTracker(vehicle.PositionMeters, vehicle.Direction, vehicle.SpeedKmh);
@@ -46,7 +52,7 @@ public sealed class TrafficController
             }
 
             tracker.Update(vehicle, orderedSensors, currentTime, road.LengthMeters);
-            _restrictedStateByVehicleId[vehicle.Id] = tracker.BuildRestrictedState(vehicle.Id, orderedSensors, currentTime, road.LengthMeters);
+            _restrictedStateByVehicleId[vehicle.Id] = tracker.BuildRestrictedState(vehicle, orderedSensors, currentTime, road.LengthMeters);
         }
     }
 
@@ -134,14 +140,17 @@ public sealed class TrafficController
             RefreshSensorSignal(orderedSensors, currentTime);
         }
 
-        public VehicleRestrictedState BuildRestrictedState(string vehicleId, IReadOnlyList<int> orderedSensors, TimeSpan currentTime, int roadLengthMeters)
+        public VehicleRestrictedState BuildRestrictedState(Vehicle vehicle, IReadOnlyList<int> orderedSensors, TimeSpan currentTime, int roadLengthMeters)
         {
+            ArgumentNullException.ThrowIfNull(vehicle);
             var estimatedPosition = EstimatePosition(currentTime);
             estimatedPosition = Math.Clamp(estimatedPosition, 0d, roadLengthMeters);
             var insideSensorZone = orderedSensors.Any(sensor => Math.Abs(sensor - estimatedPosition) <= SensorVisibilityToleranceMeters);
 
             return new VehicleRestrictedState(
-                VehicleId: vehicleId,
+                VehicleId: vehicle.Id,
+                IsPriority: vehicle.IsPriority,
+                HasLoad: vehicle.HasLoad,
                 PreviousSensorId: PreviousSensorId,
                 LastSensorId: LastSensorId,
                 PreviousSensorTriggeredAt: PreviousSensorTriggeredAt,
@@ -270,5 +279,13 @@ public sealed class TrafficController
             var candidates = orderedSensors.Where(sensor => sensor < lastSensor).ToList();
             return candidates.Count == 0 ? null : candidates.Max();
         }
+    }
+
+    private static bool IsTrackableOnMainLane(Vehicle vehicle)
+    {
+        return vehicle.CurrentTask == VehicleTask.GoingToDepot ||
+               vehicle.CurrentTask == VehicleTask.ReturningHome ||
+               vehicle.CurrentTask == VehicleTask.GoingToPocketForYielding ||
+               vehicle.CurrentTask == VehicleTask.WaitingInPocket;
     }
 }

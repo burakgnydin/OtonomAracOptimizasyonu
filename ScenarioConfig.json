@@ -1,7 +1,7 @@
 {
   "scenario": {
-    "name": "Deadlock Onleme ve Gorev Donusu (5 Arac)",
-    "description": "Araclar depoya gidip yuk alir, baslangic konumuna doner; karsilasma riskinde cep/depo bekleme ve deadlock onleme davranisi gorulur."
+    "name": "Eszamanli Cift Yonlu Senaryo (4 Arac)",
+    "description": "Araclar 0m ve 240m noktalarindan eszamanli cikarak depoya gider, yuk alir ve kendi cikis noktasina doner."
   },
   "road": {
     "lengthMeters": 240,
@@ -20,7 +20,7 @@
       "direction": "LeftToRight",
       "positionMeters": 0,
       "speedKmh": 10,
-      "targetDepotPositionMeters": 240,
+      "targetDepotPositionMeters": 120,
       "isPriority": true,
       "singleMissionOnly": true
     },
@@ -29,28 +29,21 @@
       "direction": "RightToLeft",
       "positionMeters": 240,
       "speedKmh": 9,
-      "targetDepotPositionMeters": 70
+      "targetDepotPositionMeters": 120
     },
     {
       "id": "V3",
       "direction": "LeftToRight",
       "positionMeters": 0,
       "speedKmh": 8,
-      "targetDepotPositionMeters": 120
+      "targetDepotPositionMeters": 240
     },
     {
       "id": "V4",
       "direction": "RightToLeft",
-      "positionMeters": 160,
+      "positionMeters": 240,
       "speedKmh": 10,
       "targetDepotPositionMeters": 70
-    },
-    {
-      "id": "V5",
-      "direction": "LeftToRight",
-      "positionMeters": 130,
-      "speedKmh": 9,
-      "targetDepotPositionMeters": 240
     }
   ]
 }

@@ -26,19 +26,22 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             throw new ArgumentOutOfRangeException(nameof(tickDurationSeconds), "Tick suresi sifirdan buyuk olmalidir.");
         }
 
-        if (vehicle.CurrentTask == VehicleTask.WaitingInSafeArea)
+        if (vehicle.CurrentTask == VehicleTask.WaitingInPocket)
         {
             return CanExitSafeArea(vehicle, trafficState)
                 ? TrafficDecision.MoveAllowed()
                 : TrafficDecision.Stop(TrafficStopReason.DeadlockAvoidance, "Guvenli alanda bekliyor");
         }
 
-        if (vehicle.CurrentTask == VehicleTask.RetreatingToSafeArea)
+        if (vehicle.CurrentTask == VehicleTask.GoingToPocketForYielding)
         {
             return TrafficDecision.MoveAllowed();
         }
 
-        if (vehicle.CurrentTask == VehicleTask.LoadingAtDepot)
+        if (vehicle.CurrentTask == VehicleTask.LoadingAtDepot ||
+            vehicle.CurrentTask == VehicleTask.UnloadingAtHome ||
+            vehicle.CurrentTask == VehicleTask.InGarage ||
+            vehicle.CurrentTask == VehicleTask.Completed)
         {
             return TrafficDecision.Stop(TrafficStopReason.None, "Yukleme islemi devam ediyor");
         }
@@ -103,12 +106,12 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
         VehicleRestrictedState? oncomingVehicle,
         Road road)
     {
-        if (oncomingVehicle is null || !IsLowerPriority(vehicle, oncomingVehicle))
+        if (oncomingVehicle is null || !ShouldCurrentVehicleYield(vehicle, currentVehicleState, oncomingVehicle, road))
         {
             return null;
         }
 
-        if (vehicle.CurrentTask != VehicleTask.NormalDrive)
+        if (!IsRoadDrivingTask(vehicle.CurrentTask))
         {
             return null;
         }
@@ -136,14 +139,40 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             .FirstOrDefault();
     }
 
-    private static bool IsLowerPriority(Vehicle candidate, VehicleRestrictedState other)
+    private static bool ShouldCurrentVehicleYield(
+        Vehicle currentVehicle,
+        VehicleRestrictedState currentState,
+        VehicleRestrictedState oncomingState,
+        Road road)
     {
-        if (candidate.IsPriority)
+        if (currentVehicle.IsPriority != oncomingState.IsPriority)
         {
-            return false;
+            return !currentVehicle.IsPriority;
         }
 
-        return string.CompareOrdinal(candidate.Id, other.VehicleId) > 0;
+        if (currentVehicle.HasLoad != oncomingState.HasLoad)
+        {
+            return !currentVehicle.HasLoad;
+        }
+
+        var currentDistance = GetNearestSafeAreaDistance(currentVehicle.Id, currentState, road);
+        var oncomingDistance = GetNearestSafeAreaDistance(oncomingState.VehicleId, oncomingState, road);
+
+        if (Math.Abs(currentDistance - oncomingDistance) > 0.001d)
+        {
+            // Cebe/depo'ya daha kolay ulasan arac yol verir.
+            return currentDistance < oncomingDistance;
+        }
+
+        return string.CompareOrdinal(currentVehicle.Id, oncomingState.VehicleId) > 0;
+    }
+
+    private static double GetNearestSafeAreaDistance(string vehicleId, VehicleRestrictedState state, Road road)
+    {
+        var safeArea = FindNearestAvailableSafeArea(vehicleId, state, road);
+        return safeArea is null
+            ? double.MaxValue
+            : Math.Abs(safeArea.PositionMeters - state.EstimatedPositionMeters);
     }
 
     private static bool CanExitSafeArea(Vehicle vehicle, IReadOnlyCollection<VehicleRestrictedState> trafficState)
@@ -173,7 +202,7 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
         VehicleRestrictedState? oncomingVehicle,
         Road road)
     {
-        if (oncomingVehicle is null || !IsLowerPriority(vehicle, oncomingVehicle))
+        if (oncomingVehicle is null || !ShouldCurrentVehicleYield(vehicle, currentVehicleState, oncomingVehicle, road))
         {
             return null;
         }
@@ -221,7 +250,12 @@ public sealed class SafetyFirstTrafficStrategy : ITrafficStrategy
             return false;
         }
 
-        return vehicle.CurrentTask == VehicleTask.NormalDrive;
+        return IsRoadDrivingTask(vehicle.CurrentTask);
+    }
+
+    private static bool IsRoadDrivingTask(VehicleTask task)
+    {
+        return task == VehicleTask.GoingToDepot || task == VehicleTask.ReturningHome;
     }
 
     private static TrafficDecision? CreateSensorTimeoutManeuverDecision(VehicleRestrictedState currentVehicleState, Road road)

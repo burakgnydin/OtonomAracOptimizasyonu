@@ -4,6 +4,8 @@ namespace OtonomAracOptimizasyonu.Services;
 
 public sealed record VehicleRestrictedState(
     string VehicleId,
+    bool IsPriority,
+    bool HasLoad,
     int? PreviousSensorId,
     int? LastSensorId,
     TimeSpan? PreviousSensorTriggeredAt,

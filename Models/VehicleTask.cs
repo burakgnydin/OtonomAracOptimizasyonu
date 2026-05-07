@@ -2,10 +2,15 @@ namespace OtonomAracOptimizasyonu.Models;
 
 public enum VehicleTask
 {
-    NormalDrive = 0,
-    RetreatingToSafeArea = 1,
-    WaitingInSafeArea = 2,
-    LoadingAtDepot = 3,
-    GoingToPocketForYielding = RetreatingToSafeArea,
-    WaitingInPocket = WaitingInSafeArea
+    InGarage = 0,
+    GoingToDepot = 1,
+    LoadingAtDepot = 2,
+    ReturningHome = 3,
+    UnloadingAtHome = 4,
+    Completed = 5,
+    GoingToPocketForYielding = 6,
+    WaitingInPocket = 7,
+    NormalDrive = GoingToDepot,
+    RetreatingToSafeArea = GoingToPocketForYielding,
+    WaitingInSafeArea = WaitingInPocket
 }

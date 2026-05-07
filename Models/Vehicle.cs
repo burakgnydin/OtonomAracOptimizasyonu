@@ -37,12 +37,13 @@ public sealed class Vehicle
         Id = id;
         Direction = direction;
         PositionMeters = positionMeters;
+        HomePositionMeters = positionMeters;
         SpeedKmh = speedKmh;
         TargetDepotPositionMeters = targetDepotPositionMeters;
         OriginalTargetDepotPositionMeters = targetDepotPositionMeters;
         IsPriority = isPriority;
         SingleMissionOnly = singleMissionOnly;
-        CurrentTask = VehicleTask.NormalDrive;
+        CurrentTask = VehicleTask.GoingToDepot;
     }
 
     public string Id { get; }
@@ -50,6 +51,8 @@ public sealed class Vehicle
     public VehicleDirection Direction { get; private set; }
 
     public double PositionMeters { get; private set; }
+
+    public double HomePositionMeters { get; }
 
     public double SpeedKmh { get; private set; }
 
@@ -120,12 +123,12 @@ public sealed class Vehicle
             throw new ArgumentException("Yol verilecek arac kimligi bos olamaz.", nameof(yieldToVehicleId));
         }
 
-        if (CurrentTask == VehicleTask.NormalDrive)
+        if (CurrentTask == VehicleTask.GoingToDepot || CurrentTask == VehicleTask.ReturningHome)
         {
             OriginalTargetDepotPositionMeters = TargetDepotPositionMeters;
         }
 
-        CurrentTask = VehicleTask.RetreatingToSafeArea;
+        CurrentTask = VehicleTask.GoingToPocketForYielding;
         ManeuverSafeAreaPositionMeters = safeAreaPositionMeters;
         YieldToVehicleId = yieldToVehicleId;
         TargetDepotPositionMeters = safeAreaPositionMeters;
@@ -136,15 +139,15 @@ public sealed class Vehicle
 
     public void MarkWaitingInSafeArea()
     {
-        if (CurrentTask == VehicleTask.RetreatingToSafeArea || CurrentTask == VehicleTask.WaitingInSafeArea)
+        if (CurrentTask == VehicleTask.GoingToPocketForYielding || CurrentTask == VehicleTask.WaitingInPocket)
         {
-            CurrentTask = VehicleTask.WaitingInSafeArea;
+            CurrentTask = VehicleTask.WaitingInPocket;
         }
     }
 
     public void ResumeOriginalMission()
     {
-        CurrentTask = VehicleTask.NormalDrive;
+        CurrentTask = HasLoad ? VehicleTask.ReturningHome : VehicleTask.GoingToDepot;
         TargetDepotPositionMeters = OriginalTargetDepotPositionMeters;
         ManeuverSafeAreaPositionMeters = null;
         YieldToVehicleId = null;
@@ -163,14 +166,14 @@ public sealed class Vehicle
     public void FinishLoadingAndCarryLoad()
     {
         HasLoad = true;
-        CurrentTask = VehicleTask.NormalDrive;
+        CurrentTask = VehicleTask.ReturningHome;
     }
 
     public void CompleteDeliveryCycle()
     {
         HasLoad = false;
         CompletedMissionCount++;
-        CurrentTask = VehicleTask.NormalDrive;
+        CurrentTask = VehicleTask.Completed;
     }
 
     public void RegisterDepotVisit(int depotPositionMeters)
@@ -181,5 +184,43 @@ public sealed class Vehicle
         }
 
         _visitedDepotPositions.Add(depotPositionMeters);
+    }
+
+    public void EnterGarage()
+    {
+        CurrentTask = VehicleTask.InGarage;
+        UpdateSpeed(0d);
+        UpdatePosition(HomePositionMeters);
+        ManeuverSafeAreaPositionMeters = null;
+        YieldToVehicleId = null;
+    }
+
+    public void DispatchToDepot(int depotPositionMeters, double cruiseSpeedKmh)
+    {
+        UpdatePosition(HomePositionMeters);
+        UpdateTargetDepot(depotPositionMeters);
+        OriginalTargetDepotPositionMeters = depotPositionMeters;
+        UpdateDirection(depotPositionMeters >= PositionMeters
+            ? VehicleDirection.LeftToRight
+            : VehicleDirection.RightToLeft);
+        UpdateSpeed(cruiseSpeedKmh);
+        CurrentTask = VehicleTask.GoingToDepot;
+    }
+
+    public void StartUnloadingAtHome()
+    {
+        CurrentTask = VehicleTask.UnloadingAtHome;
+        UpdateSpeed(0d);
+        UpdatePosition(HomePositionMeters);
+    }
+
+    public void StartReturningHome(double cruiseSpeedKmh)
+    {
+        UpdateTargetDepot((int)Math.Round(HomePositionMeters, MidpointRounding.AwayFromZero));
+        UpdateDirection(HomePositionMeters >= PositionMeters
+            ? VehicleDirection.LeftToRight
+            : VehicleDirection.RightToLeft);
+        UpdateSpeed(cruiseSpeedKmh);
+        CurrentTask = VehicleTask.ReturningHome;
     }
 }
